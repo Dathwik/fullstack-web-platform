@@ -1,29 +1,25 @@
 # Full-Stack Web Platform
 
 ## Overview
-This repository contains the source code for a full-stack web application developed as part of my Post-Completion OPT self-employment.  
-The application is designed using modern full-stack technologies to handle user interactions, backend processing, and data persistence.
+This repository contains the source code for a full-stack web application developed as part of my Post-Completion OPT self-employment as a Software Engineer. The application is designed using a modern full-stack approach, integrating frontend and backend components, database logic, and network APIs.
 
-## Purpose
-The goal of this project is to demonstrate practical application of core Computer Science concepts including web development, API design, database management, and system architecture.
-
-## Tech Stack
+## Technologies (planned)
 - Frontend: React
 - Backend: Node.js + Express
 - Database: MongoDB / PostgreSQL
-- Deployment (optional): Vercel / Heroku / AWS
+- Deployment: Vercel / Heroku / AWS (as applicable)
 
-## Features
-- User interface for submitting and managing data
-- RESTful APIs for client-server communication
-- Authentication and authorization workflows
-- Data validation and error handling
+## Core Functionality
+- User interactions through a React interface
+- Backend REST API for data processing and storage
+- Database schema design and relationship handling
+- Authentication and validation logic
 
 ## Relation to Field of Study
-This project applies software engineering principles and practical programming skills that directly relate to my Computer Science major. Core activities include architecture design, backend development, database design, API creation, and integration testing.
+The project requires the application of software engineering principles and computer science fundamentals such as data structures, algorithms, system design, API architecture, and database management — all core to my Computer Science degree.
 
-## Status
-Actively under development as part of full-time OPT self-employment (20+ hours/week).
+## Development Status
+Actively under development as part of full-time (20+ hrs/week) OPT self-employment.
 
 ## License
 This project is licensed under the MIT License.
