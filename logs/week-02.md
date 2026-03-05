@@ -94,7 +94,7 @@ The process of converting business requirements into structured system behavior 
 ## Evidence
 
 - Functional requirements documentation added to repository:
-  - `/docs/week-2-functional-requirements.md`
+  - `/docs/SRS.md`
 - GitHub commits referencing requirements definition
 - Structured project documentation outlining workflows and system behaviors
 - Development logs maintained in repository commit history
