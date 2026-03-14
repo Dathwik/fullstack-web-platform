@@ -3,7 +3,7 @@
 **Name:** Dathwik Kollikonda  
 **Role:** Software Engineer (Self-Employed)  
 **Employment Type:** Post-Completion OPT – Self-Employment  
-**Hours Worked:** 23 hours  
+**Hours Worked:** 21 hours  
 
 ---
 
