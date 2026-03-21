@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
 CREATE TYPE order_status AS ENUM (
   'Received',
   'In Preparation',
@@ -31,24 +33,7 @@ CREATE TABLE order_items (
   quantity_kg DECIMAL(5,2) NOT NULL
 );
 
-CREATE TABLE admins (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  phone VARCHAR(20) UNIQUE NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE otp_codes (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  phone VARCHAR(20) NOT NULL,
-  otp_code VARCHAR(10) NOT NULL,
-  expires_at TIMESTAMP NOT NULL,
-  verified BOOLEAN DEFAULT FALSE
-);
-
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
-/* Test Product */
-INSERT INTO products (name, price_per_kg)
-VALUES ('Spicy Mixture', 12.50);
-
-SELECT * FROM products;
+INSERT INTO products (name, price_per_kg) VALUES
+  ('Spicy Mixture', 12.50),
+  ('Khara Boondi', 9.00),
+  ('Mixture Namkeen', 11.00);
