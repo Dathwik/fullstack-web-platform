@@ -17,22 +17,26 @@ const NEXT_STATUS = {
 export default function Orders({ onLogout }) {
   const [orders, setOrders] = useState([]);
   const [filter, setFilter] = useState('active');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   async function fetchOrders() {
     try {
-      const res = await api.get('/orders');
+      const params = {};
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo)   params.date_to   = dateTo;
+      const res = await api.get('/orders', { params });
       setOrders(res.data);
     } catch {
-      // session expired
       onLogout();
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { fetchOrders(); }, []);
+  useEffect(() => { fetchOrders(); }, [dateFrom, dateTo]);
 
   async function advanceStatus(e, order) {
     e.stopPropagation();
@@ -49,6 +53,15 @@ export default function Orders({ onLogout }) {
     fetchOrders();
   }
 
+  function handleExport() {
+    window.location.href = '/api/orders/export';
+  }
+
+  function clearDates() {
+    setDateFrom('');
+    setDateTo('');
+  }
+
   const filtered = orders.filter(o => {
     if (filter === 'active') return o.status === 'Received' || o.status === 'In Preparation';
     if (filter === 'done')   return o.status === 'Completed' || o.status === 'Cancelled';
@@ -62,6 +75,12 @@ export default function Orders({ onLogout }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h1 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Orders</h1>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button
+            onClick={handleExport}
+            style={{ padding: '0.5rem 0.85rem', borderRadius: 8, background: '#f0f0eb', fontSize: '0.85rem', fontWeight: 500 }}
+          >
+            Export CSV
+          </button>
           <button
             onClick={() => navigate('/products')}
             style={{ padding: '0.5rem 0.85rem', borderRadius: 8, background: '#f0f0eb', fontSize: '0.85rem', fontWeight: 500 }}
@@ -77,8 +96,8 @@ export default function Orders({ onLogout }) {
         </div>
       </div>
 
-      {/* Filter tabs */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+      {/* Status filter tabs */}
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
         {[['active','Active'],['done','Done'],['all','All']].map(([val, label]) => (
           <button key={val} onClick={() => setFilter(val)} style={{
             padding: '0.4rem 0.85rem', borderRadius: 20,
@@ -89,6 +108,31 @@ export default function Orders({ onLogout }) {
             {label}
           </button>
         ))}
+      </div>
+
+      {/* Date filter */}
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={e => setDateFrom(e.target.value)}
+          style={{ flex: 1, padding: '0.4rem 0.6rem', border: '1.5px solid #ddd', borderRadius: 8, fontSize: '0.85rem' }}
+        />
+        <span style={{ color: '#aaa', fontSize: '0.85rem' }}>–</span>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={e => setDateTo(e.target.value)}
+          style={{ flex: 1, padding: '0.4rem 0.6rem', border: '1.5px solid #ddd', borderRadius: 8, fontSize: '0.85rem' }}
+        />
+        {(dateFrom || dateTo) && (
+          <button
+            onClick={clearDates}
+            style={{ padding: '0.4rem 0.6rem', borderRadius: 8, background: '#f0f0eb', color: '#555', fontSize: '0.8rem' }}
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Orders list */}

@@ -5,6 +5,8 @@ import Orders from './pages/Orders';
 import NewOrder from './pages/NewOrder';
 import Products from './pages/Products';
 import OrderDetail from './pages/OrderDetail';
+import PlaceOrder from './pages/PlaceOrder';
+import OrderConfirmation from './pages/OrderConfirmation';
 import api from './api';
 
 export default function App() {
@@ -23,17 +25,25 @@ export default function App() {
 
   if (authed === null) return null; // splash while checking session
 
-  if (!authed) return <Login onLogin={() => setAuthed(true)} />;
-
   return (
     <BrowserRouter>
       <Routes>
-        
-        <Route path="/"            element={<Orders onLogout={handleLogout} />} />
-        <Route path="/new-order"   element={<NewOrder />} />
-        <Route path="/products"    element={<Products />} />
-        <Route path="/orders/:id" element={<OrderDetail />} />
-        <Route path="*"            element={<Navigate to="/" />} />
+        {/* Public routes — accessible without login */}
+        <Route path="/place-order"        element={<PlaceOrder />} />
+        <Route path="/order-confirmation" element={<OrderConfirmation />} />
+
+        {/* Protected routes */}
+        {!authed ? (
+          <Route path="*" element={<Login onLogin={() => setAuthed(true)} />} />
+        ) : (
+          <>
+            <Route path="/"           element={<Orders onLogout={handleLogout} />} />
+            <Route path="/new-order"  element={<NewOrder />} />
+            <Route path="/products"   element={<Products />} />
+            <Route path="/orders/:id" element={<OrderDetail />} />
+            <Route path="*"           element={<Navigate to="/" />} />
+          </>
+        )}
       </Routes>
     </BrowserRouter>
   );

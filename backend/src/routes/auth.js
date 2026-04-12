@@ -1,10 +1,14 @@
 const express = require('express');
 const router = express.Router();
+const bcrypt = require('bcryptjs');
 
 // POST /api/auth/login
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   const { password } = req.body;
-  if (password === process.env.ADMIN_PASSWORD) {
+  const hash = process.env.ADMIN_PASSWORD_HASH;
+  if (!hash) return res.status(500).json({ error: 'Server misconfigured: ADMIN_PASSWORD_HASH not set' });
+  const valid = await bcrypt.compare(password, hash);
+  if (valid) {
     req.session.authenticated = true;
     return res.json({ success: true });
   }
