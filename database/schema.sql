@@ -21,6 +21,7 @@ CREATE TABLE orders (
   email VARCHAR(100),
   address TEXT NOT NULL,
   status order_status DEFAULT 'Received',
+  payment_received BOOLEAN DEFAULT FALSE,
   special_instructions TEXT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

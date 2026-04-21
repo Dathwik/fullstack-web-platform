@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api';
 
@@ -20,37 +20,59 @@ export default function Orders({ onLogout }) {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(true);
+  const [newAlert, setNewAlert] = useState(false);
   const navigate = useNavigate();
 
-  async function fetchOrders() {
+  // ISO timestamp recorded when this session started; orders newer than this are "new"
+  const sessionStartRef = useRef(new Date().toISOString());
+  // Track whether we have already alerted for a given set of new orders
+  const alertedCountRef = useRef(0);
+
+  async function fetchOrders({ silent = false } = {}) {
     try {
       const params = {};
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo)   params.date_to   = dateTo;
       const res = await api.get('/orders', { params });
-      setOrders(res.data);
+      const newOrders = res.data;
+
+      // Count Received orders placed after the page loaded
+      const newCount = newOrders.filter(
+        o => o.status === 'Received' && o.created_at > sessionStartRef.current
+      ).length;
+      if (newCount > alertedCountRef.current) {
+        setNewAlert(true);
+        alertedCountRef.current = newCount;
+      }
+
+      setOrders(newOrders);
     } catch {
-      onLogout();
+      if (!silent) onLogout();
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
-  useEffect(() => { fetchOrders(); }, [dateFrom, dateTo]);
+  // Initial load + restart polling whenever date filters change
+  useEffect(() => {
+    fetchOrders();
+    const interval = setInterval(() => fetchOrders({ silent: true }), 30000);
+    return () => clearInterval(interval);
+  }, [dateFrom, dateTo]);
 
   async function advanceStatus(e, order) {
     e.stopPropagation();
     const next = NEXT_STATUS[order.status];
     if (!next) return;
     await api.patch(`/orders/${order.id}/status`, { status: next });
-    fetchOrders();
+    fetchOrders({ silent: true });
   }
 
   async function cancelOrder(e, order) {
     e.stopPropagation();
     if (!confirm('Cancel this order?')) return;
     await api.patch(`/orders/${order.id}/status`, { status: 'Cancelled' });
-    fetchOrders();
+    fetchOrders({ silent: true });
   }
 
   function handleExport() {
@@ -62,6 +84,13 @@ export default function Orders({ onLogout }) {
     setDateTo('');
   }
 
+  function dismissAlert() {
+    setNewAlert(false);
+    // Move the session baseline forward so these orders are no longer "new"
+    sessionStartRef.current = new Date().toISOString();
+    alertedCountRef.current = 0;
+  }
+
   const filtered = orders.filter(o => {
     if (filter === 'active') return o.status === 'Received' || o.status === 'In Preparation';
     if (filter === 'done')   return o.status === 'Completed' || o.status === 'Cancelled';
@@ -70,6 +99,24 @@ export default function Orders({ onLogout }) {
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: '1rem' }}>
+
+      {/* New orders banner */}
+      {newAlert && (
+        <div
+          onClick={dismissAlert}
+          style={{
+            background: '#eff6ff', border: '1.5px solid #93c5fd',
+            borderRadius: 10, padding: '0.65rem 1rem',
+            marginBottom: '0.75rem', cursor: 'pointer',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}
+        >
+          <p style={{ fontSize: '0.85rem', color: '#1d4ed8', fontWeight: 600 }}>
+            New orders received
+          </p>
+          <span style={{ fontSize: '0.8rem', color: '#93c5fd' }}>Dismiss</span>
+        </div>
+      )}
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -113,15 +160,13 @@ export default function Orders({ onLogout }) {
       {/* Date filter */}
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
         <input
-          type="date"
-          value={dateFrom}
+          type="date" value={dateFrom}
           onChange={e => setDateFrom(e.target.value)}
           style={{ flex: 1, padding: '0.4rem 0.6rem', border: '1.5px solid #ddd', borderRadius: 8, fontSize: '0.85rem' }}
         />
         <span style={{ color: '#aaa', fontSize: '0.85rem' }}>–</span>
         <input
-          type="date"
-          value={dateTo}
+          type="date" value={dateTo}
           onChange={e => setDateTo(e.target.value)}
           style={{ flex: 1, padding: '0.4rem 0.6rem', border: '1.5px solid #ddd', borderRadius: 8, fontSize: '0.85rem' }}
         />
@@ -160,14 +205,21 @@ export default function Orders({ onLogout }) {
                   <p style={{ fontWeight: 600, fontSize: '1rem' }}>{order.customer_name}</p>
                   <p style={{ fontSize: '0.8rem', color: '#888', marginTop: '0.1rem' }}>{order.phone}</p>
                 </div>
-                <span style={{
-                  padding: '0.25rem 0.6rem', borderRadius: 20,
-                  background: sc.bg, color: sc.color,
-                  border: `1px solid ${sc.border}`,
-                  fontSize: '0.75rem', fontWeight: 600, whiteSpace: 'nowrap',
-                }}>
-                  {order.status}
-                </span>
+                <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                  {order.payment_received && (
+                    <span style={{ fontSize: '0.7rem', color: '#15803d', fontWeight: 600, background: '#f0fdf4', border: '1px solid #86efac', padding: '0.15rem 0.45rem', borderRadius: 20 }}>
+                      Paid
+                    </span>
+                  )}
+                  <span style={{
+                    padding: '0.25rem 0.6rem', borderRadius: 20,
+                    background: sc.bg, color: sc.color,
+                    border: `1px solid ${sc.border}`,
+                    fontSize: '0.75rem', fontWeight: 600, whiteSpace: 'nowrap',
+                  }}>
+                    {order.status}
+                  </span>
+                </div>
               </div>
 
               <p style={{ fontSize: '0.85rem', color: '#555', marginBottom: '0.5rem' }}>

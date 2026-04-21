@@ -3,12 +3,19 @@ const router = express.Router();
 const pool = require('../db');
 const requireAuth = require('../middleware/auth');
 
+const VALID_TRANSITIONS = {
+  'Received':       ['In Preparation', 'Cancelled'],
+  'In Preparation': ['Completed'],
+  'Completed':      [],
+  'Cancelled':      [],
+};
+
 // GET /api/orders/export — download all orders as CSV (registered before /:id)
 router.get('/export', requireAuth, async (_req, res) => {
   try {
     const result = await pool.query(
       `SELECT o.id, o.customer_name, o.phone, o.email, o.address, o.status,
-              o.special_instructions, o.created_at,
+              o.payment_received, o.special_instructions, o.created_at,
               COALESCE(json_agg(
                 json_build_object(
                   'product_name', p.name,
@@ -31,7 +38,7 @@ router.get('/export', requireAuth, async (_req, res) => {
         : s;
     };
 
-    const headers = ['Order ID', 'Customer Name', 'Phone', 'Email', 'Address', 'Status', 'Items', 'Total ($)', 'Date', 'Special Instructions'];
+    const headers = ['Order ID', 'Customer Name', 'Phone', 'Email', 'Address', 'Status', 'Payment', 'Items', 'Total ($)', 'Date', 'Special Instructions'];
     const lines = [headers.join(',')];
 
     for (const row of result.rows) {
@@ -44,6 +51,7 @@ router.get('/export', requireAuth, async (_req, res) => {
         escape(row.email),
         escape(row.address),
         escape(row.status),
+        escape(row.payment_received ? 'Paid' : 'Unpaid'),
         escape(itemsSummary),
         escape(total.toFixed(2)),
         escape(new Date(row.created_at).toISOString()),
@@ -54,6 +62,21 @@ router.get('/export', requireAuth, async (_req, res) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="orders.csv"');
     res.send(lines.join('\n'));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/orders/new-since?since=<iso-timestamp> — count of Received orders placed after timestamp
+router.get('/new-since', requireAuth, async (req, res) => {
+  try {
+    const { since } = req.query;
+    if (!since) return res.json({ count: 0 });
+    const result = await pool.query(
+      `SELECT COUNT(*) FROM orders WHERE status='Received' AND created_at > $1::timestamptz`,
+      [since]
+    );
+    res.json({ count: parseInt(result.rows[0].count, 10) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -211,22 +234,92 @@ router.post('/', requireAuth, async (req, res) => {
   }
 });
 
-// PATCH /api/orders/:id/status — move order through lifecycle
+// PATCH /api/orders/:id/status — move order through lifecycle (transitions enforced)
 router.patch('/:id/status', requireAuth, async (req, res) => {
   try {
-    const valid = ['Received', 'In Preparation', 'Completed', 'Cancelled'];
     const { status } = req.body;
-    if (!valid.includes(status))
-      return res.status(400).json({ error: `status must be one of: ${valid.join(', ')}` });
+    const current = await pool.query('SELECT status FROM orders WHERE id=$1', [req.params.id]);
+    if (!current.rows.length)
+      return res.status(404).json({ error: 'Order not found' });
+
+    const currentStatus = current.rows[0].status;
+    const allowed = VALID_TRANSITIONS[currentStatus] || [];
+    if (!allowed.includes(status))
+      return res.status(400).json({
+        error: `Cannot transition from "${currentStatus}" to "${status}". Allowed: ${allowed.join(', ') || 'none'}`,
+      });
+
     const result = await pool.query(
       `UPDATE orders SET status=$1::order_status, updated_at=NOW() WHERE id=$2 RETURNING *`,
       [status, req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/orders/:id/payment — toggle payment_received
+router.patch('/:id/payment', requireAuth, async (req, res) => {
+  try {
+    const { payment_received } = req.body;
+    const result = await pool.query(
+      `UPDATE orders SET payment_received=$1, updated_at=NOW() WHERE id=$2 RETURNING *`,
+      [Boolean(payment_received), req.params.id]
     );
     if (!result.rows.length)
       return res.status(404).json({ error: 'Order not found' });
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/orders/:id — edit order details (only Received or In Preparation)
+router.patch('/:id', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const existing = await client.query('SELECT status FROM orders WHERE id=$1', [req.params.id]);
+    if (!existing.rows.length)
+      return res.status(404).json({ error: 'Order not found' });
+
+    const { status } = existing.rows[0];
+    if (status === 'Completed' || status === 'Cancelled')
+      return res.status(400).json({ error: 'Cannot edit a completed or cancelled order' });
+
+    const { customer_name, phone, address, email, special_instructions, items } = req.body;
+    if (!customer_name || !phone || !address)
+      return res.status(400).json({ error: 'customer_name, phone, address required' });
+    if (!items || items.length === 0)
+      return res.status(400).json({ error: 'At least one item required' });
+
+    await client.query('BEGIN');
+
+    const orderResult = await client.query(
+      `UPDATE orders SET
+         customer_name=$1, phone=$2, address=$3,
+         email=$4, special_instructions=$5, updated_at=NOW()
+       WHERE id=$6 RETURNING *`,
+      [customer_name, phone, address, email || null, special_instructions || null, req.params.id]
+    );
+
+    await client.query('DELETE FROM order_items WHERE order_id=$1', [req.params.id]);
+    for (const item of items) {
+      if (!item.product_id || !item.quantity_kg || item.quantity_kg < 1)
+        throw new Error('Each item needs product_id and quantity_kg (min 1kg)');
+      await client.query(
+        'INSERT INTO order_items (order_id, product_id, quantity_kg) VALUES ($1,$2,$3)',
+        [req.params.id, item.product_id, item.quantity_kg]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json(orderResult.rows[0]);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
