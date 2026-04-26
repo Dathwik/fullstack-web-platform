@@ -11,7 +11,8 @@ CREATE TABLE products (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name VARCHAR(100) NOT NULL,
   price_per_kg DECIMAL(10,2) NOT NULL,
-  is_available BOOLEAN DEFAULT TRUE
+  is_available BOOLEAN DEFAULT TRUE,
+  stock_kg DECIMAL(8,2)
 );
 
 CREATE TABLE orders (

@@ -21,6 +21,7 @@ export default function Orders({ onLogout }) {
   const [dateTo, setDateTo] = useState('');
   const [loading, setLoading] = useState(true);
   const [newAlert, setNewAlert] = useState(false);
+  const [stats, setStats] = useState(null);
   const navigate = useNavigate();
 
   // ISO timestamp recorded when this session started; orders newer than this are "new"
@@ -59,6 +60,10 @@ export default function Orders({ onLogout }) {
     const interval = setInterval(() => fetchOrders({ silent: true }), 30000);
     return () => clearInterval(interval);
   }, [dateFrom, dateTo]);
+
+  useEffect(() => {
+    api.get('/orders/stats').then(r => setStats(r.data)).catch(() => {});
+  }, []);
 
   async function advanceStatus(e, order) {
     e.stopPropagation();
@@ -115,6 +120,23 @@ export default function Orders({ onLogout }) {
             New orders received
           </p>
           <span style={{ fontSize: '0.8rem', color: '#93c5fd' }}>Dismiss</span>
+        </div>
+      )}
+
+      {/* Stats panel */}
+      {stats && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1rem' }}>
+          {[
+            { label: "Today's orders", value: stats.today.count },
+            { label: "Today's revenue", value: `$${stats.today.revenue.toFixed(2)}` },
+            { label: 'Pending',         value: stats.pending.count },
+            { label: 'Unpaid (COD)',    value: stats.unpaid.count },
+          ].map(({ label, value }) => (
+            <div key={label} style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 10, padding: '0.75rem 1rem' }}>
+              <p style={{ fontSize: '0.72rem', color: '#999', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.2rem' }}>{label}</p>
+              <p style={{ fontSize: '1.15rem', fontWeight: 700, color: '#1a1a1a' }}>{value}</p>
+            </div>
+          ))}
         </div>
       )}
 

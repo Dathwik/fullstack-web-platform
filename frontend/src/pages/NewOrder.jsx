@@ -106,8 +106,10 @@ export default function NewOrder() {
                 style={{ flex: 2, padding: '0.7rem 0.75rem', border: '1.5px solid #ddd', borderRadius: 10, background: '#fff', fontSize: '0.95rem' }}
               >
                 <option value="">Select product</option>
-                {products.filter(p => p.is_available).map(p => (
-                  <option key={p.id} value={p.id}>{p.name} (${p.price_per_kg}/kg)</option>
+                {products.filter(p => p.is_available && (p.stock_kg === null || parseFloat(p.stock_kg) > 0)).map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} (${p.price_per_kg}/kg{p.stock_kg !== null ? ` — ${parseFloat(p.stock_kg)}kg left` : ''})
+                  </option>
                 ))}
               </select>
               <input

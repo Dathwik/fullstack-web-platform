@@ -14,7 +14,9 @@ export default function PlaceOrder() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    api.get('/products').then(r => setProducts(r.data.filter(p => p.is_available)));
+    api.get('/products').then(r =>
+      setProducts(r.data.filter(p => p.is_available && (p.stock_kg === null || parseFloat(p.stock_kg) > 0)))
+    );
   }, []);
 
   function setField(field, value) {
@@ -112,7 +114,9 @@ export default function PlaceOrder() {
               >
                 <option value="">Select item</option>
                 {products.map(p => (
-                  <option key={p.id} value={p.id}>{p.name} (${p.price_per_kg}/kg)</option>
+                  <option key={p.id} value={p.id}>
+                    {p.name} (${p.price_per_kg}/kg{p.stock_kg !== null ? ` — ${parseFloat(p.stock_kg)}kg left` : ''})
+                  </option>
                 ))}
               </select>
               <input

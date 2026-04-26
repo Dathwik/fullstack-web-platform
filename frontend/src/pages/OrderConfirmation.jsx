@@ -44,6 +44,19 @@ export default function OrderConfirmation() {
       >
         Place another order
       </button>
+
+      {orderId && (
+        <button
+          onClick={() => navigate(`/track-order?id=${orderId}`)}
+          style={{
+            display: 'block', width: '100%', padding: '0.9rem',
+            background: '#f0f0eb', color: '#1a1a1a',
+            borderRadius: 12, fontWeight: 600, fontSize: '1rem',
+          }}
+        >
+          Track this order
+        </button>
+      )}
     </div>
   );
 }

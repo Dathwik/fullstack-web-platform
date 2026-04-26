@@ -7,6 +7,7 @@ import Products from './pages/Products';
 import OrderDetail from './pages/OrderDetail';
 import PlaceOrder from './pages/PlaceOrder';
 import OrderConfirmation from './pages/OrderConfirmation';
+import TrackOrder from './pages/TrackOrder';
 import api from './api';
 
 export default function App() {
@@ -31,6 +32,7 @@ export default function App() {
         {/* Public routes — accessible without login */}
         <Route path="/place-order"        element={<PlaceOrder />} />
         <Route path="/order-confirmation" element={<OrderConfirmation />} />
+        <Route path="/track-order"        element={<TrackOrder />} />
 
         {/* Protected routes */}
         {!authed ? (
