@@ -134,12 +134,14 @@ router.get('/track/:id', async (req, res) => {
             'quantity_kg', oi.quantity_kg,
             'price_per_kg', p.price_per_kg
           )
-        ) FILTER (WHERE oi.id IS NOT NULL), '[]') AS items
+        ) FILTER (WHERE oi.id IS NOT NULL), '[]') AS items,
+        row_to_json(r.*) AS review
        FROM orders o
        LEFT JOIN order_items oi ON oi.order_id = o.id
        LEFT JOIN products p ON p.id = oi.product_id
+       LEFT JOIN reviews r ON r.order_id = o.id
        WHERE o.id = $1
-       GROUP BY o.id`,
+       GROUP BY o.id, r.id`,
       [req.params.id]
     );
     if (!result.rows.length)

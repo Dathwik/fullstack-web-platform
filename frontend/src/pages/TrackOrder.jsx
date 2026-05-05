@@ -16,6 +16,30 @@ const STATUS_DESC = {
   'Cancelled':      'This order has been cancelled. Please contact us for details.',
 };
 
+function StarPicker({ value, onChange }) {
+  const [hovered, setHovered] = useState(0);
+  return (
+    <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '0.75rem' }}>
+      {[1, 2, 3, 4, 5].map(n => (
+        <button
+          key={n}
+          type="button"
+          onClick={() => onChange(n)}
+          onMouseEnter={() => setHovered(n)}
+          onMouseLeave={() => setHovered(0)}
+          style={{
+            background: 'none', fontSize: '1.75rem', padding: '0.1rem',
+            color: n <= (hovered || value) ? '#f59e0b' : '#d1d5db',
+            transition: 'color 0.1s',
+          }}
+        >
+          ★
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function TrackOrder() {
   const [searchParams] = useSearchParams();
   const [orderId, setOrderId] = useState(searchParams.get('id') || '');
@@ -24,16 +48,22 @@ export default function TrackOrder() {
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
 
-  async function handleSearch(e) {
-    e.preventDefault();
-    const id = orderId.trim();
-    if (!id) return;
+  // Review form state
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+
+  async function lookupOrder(id) {
     setError('');
     setOrder(null);
     setLoading(true);
     setSearched(true);
+    setRating(0);
+    setComment('');
+    setReviewError('');
     try {
-      const res = await api.get(`/orders/track/${id}`);
+      const res = await api.get(`/orders/track/${id.trim()}`);
       setOrder(res.data);
     } catch {
       setError('Order not found. Please check your order ID and try again.');
@@ -42,18 +72,32 @@ export default function TrackOrder() {
     }
   }
 
-  // Auto-search if ?id= is in URL on first render
+  function handleSearch(e) {
+    e.preventDefault();
+    if (orderId.trim()) lookupOrder(orderId);
+  }
+
+  // Auto-search if ?id= is present in the URL
   useState(() => {
-    if (searchParams.get('id')) {
-      const id = searchParams.get('id').trim();
-      setLoading(true);
-      setSearched(true);
-      api.get(`/orders/track/${id}`)
-        .then(res => setOrder(res.data))
-        .catch(() => setError('Order not found. Please check your order ID and try again.'))
-        .finally(() => setLoading(false));
-    }
+    const id = searchParams.get('id');
+    if (id) lookupOrder(id);
   });
+
+  async function submitReview(e) {
+    e.preventDefault();
+    if (rating === 0) return setReviewError('Please select a star rating');
+    setReviewSubmitting(true);
+    setReviewError('');
+    try {
+      await api.post('/reviews', { order_id: order.id, rating, comment });
+      // Reload order so the review section switches to the "thank you" view
+      await lookupOrder(order.id);
+    } catch (err) {
+      setReviewError(err.response?.data?.error || 'Failed to submit review');
+    } finally {
+      setReviewSubmitting(false);
+    }
+  }
 
   const total = order?.items?.reduce(
     (sum, i) => sum + parseFloat(i.quantity_kg) * parseFloat(i.price_per_kg), 0
@@ -137,17 +181,64 @@ export default function TrackOrder() {
           </div>
 
           {/* Payment */}
-          <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 12, padding: '0.75rem 1rem' }}>
+          <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 12, padding: '0.75rem 1rem', marginBottom: '0.75rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <p style={{ fontSize: '0.85rem', color: '#999' }}>Payment (Cash on Delivery)</p>
-              <span style={{
-                fontSize: '0.82rem', fontWeight: 600,
-                color: order.payment_received ? '#15803d' : '#b45309',
-              }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 600, color: order.payment_received ? '#15803d' : '#b45309' }}>
                 {order.payment_received ? 'Received' : 'Pending'}
               </span>
             </div>
           </div>
+
+          {/* Review section — only for Completed orders */}
+          {order.status === 'Completed' && (
+            <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 12, padding: '1rem' }}>
+              {order.review ? (
+                /* Already reviewed */
+                <div>
+                  <p style={{ fontWeight: 600, fontSize: '0.85rem', color: '#555', marginBottom: '0.5rem' }}>Your review</p>
+                  <p style={{ fontSize: '1.3rem', letterSpacing: '0.05em', marginBottom: '0.35rem' }}>
+                    {[1,2,3,4,5].map(n => (
+                      <span key={n} style={{ color: n <= order.review.rating ? '#f59e0b' : '#e5e7eb' }}>★</span>
+                    ))}
+                  </p>
+                  {order.review.comment && (
+                    <p style={{ fontSize: '0.9rem', color: '#555' }}>{order.review.comment}</p>
+                  )}
+                </div>
+              ) : (
+                /* Review form */
+                <form onSubmit={submitReview}>
+                  <p style={{ fontWeight: 600, fontSize: '0.85rem', color: '#555', marginBottom: '0.6rem' }}>How was your order?</p>
+                  <StarPicker value={rating} onChange={setRating} />
+                  <textarea
+                    value={comment}
+                    onChange={e => setComment(e.target.value)}
+                    placeholder="Leave a comment (optional)"
+                    rows={3}
+                    style={{
+                      width: '100%', padding: '0.7rem 0.85rem',
+                      border: '1.5px solid #ddd', borderRadius: 10,
+                      fontSize: '0.9rem', resize: 'vertical',
+                      marginBottom: '0.6rem',
+                    }}
+                  />
+                  {reviewError && <p style={{ color: '#d00', fontSize: '0.82rem', marginBottom: '0.5rem' }}>{reviewError}</p>}
+                  <button
+                    type="submit" disabled={reviewSubmitting}
+                    style={{
+                      width: '100%', padding: '0.8rem',
+                      background: '#1a1a1a', color: '#fff',
+                      borderRadius: 10, fontWeight: 600, fontSize: '0.95rem',
+                      opacity: reviewSubmitting ? 0.6 : 1,
+                    }}
+                  >
+                    {reviewSubmitting ? 'Submitting...' : 'Submit review'}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
         </div>
       )}
 

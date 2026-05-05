@@ -3,6 +3,22 @@ const router = express.Router();
 const pool = require('../db');
 const requireAuth = require('../middleware/auth');
 
+// GET /api/products/low-stock?threshold=5 — products below the stock threshold (auth required)
+router.get('/low-stock', requireAuth, async (req, res) => {
+  try {
+    const threshold = parseFloat(req.query.threshold) || 5;
+    const result = await pool.query(
+      `SELECT * FROM products
+       WHERE stock_kg IS NOT NULL AND stock_kg < $1
+       ORDER BY stock_kg ASC`,
+      [threshold]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/products — public, used to populate order forms
 router.get('/', async (req, res) => {
   try {

@@ -66,6 +66,7 @@ export default function OrderDetail() {
   const [products, setProducts] = useState([]);
   const [saving, setSaving] = useState(false);
   const [editError, setEditError] = useState('');
+  const [review, setReview] = useState(null);
 
   async function fetchOrder() {
     try {
@@ -79,6 +80,12 @@ export default function OrderDetail() {
   }
 
   useEffect(() => { fetchOrder(); }, [id]);
+
+  useEffect(() => {
+    api.get(`/reviews/order/${id}`)
+      .then(r => setReview(r.data))
+      .catch(() => setReview(null));
+  }, [id]);
 
   useEffect(() => {
     if (editing) {
@@ -167,6 +174,56 @@ export default function OrderDetail() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function printReceipt() {
+    const win = window.open('', '_blank', 'width=620,height=780');
+    const itemsHtml = order.items.map(item => {
+      const subtotal = parseFloat(item.quantity_kg) * parseFloat(item.price_per_kg);
+      return `<tr>
+        <td>${item.product_name}</td>
+        <td style="text-align:center">${item.quantity_kg}kg</td>
+        <td style="text-align:right">$${subtotal.toFixed(2)}</td>
+      </tr>`;
+    }).join('');
+    const t = order.items.reduce(
+      (s, i) => s + parseFloat(i.quantity_kg) * parseFloat(i.price_per_kg), 0
+    );
+    win.document.write(`<!DOCTYPE html><html><head>
+      <title>Packing Slip — ${order.id.slice(0, 8).toUpperCase()}</title>
+      <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:sans-serif;padding:2rem;font-size:14px}
+        h1{font-size:1.2rem;margin-bottom:0.25rem}
+        .meta{color:#666;margin-bottom:1.5rem;font-size:0.85rem}
+        table{width:100%;border-collapse:collapse;margin-bottom:1rem}
+        th{text-align:left;border-bottom:2px solid #000;padding:0.5rem 0}
+        td{padding:0.4rem 0;border-bottom:1px solid #eee}
+        .total{font-weight:bold;font-size:1rem;text-align:right;margin-top:0.5rem}
+        .section{margin-bottom:1.25rem}
+        .label{font-size:0.75rem;color:#999;text-transform:uppercase;letter-spacing:0.04em}
+      </style>
+    </head><body>
+      <h1>Packing Slip</h1>
+      <p class="meta">Order #${order.id.slice(0, 8).toUpperCase()} &nbsp;·&nbsp; ${new Date(order.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</p>
+      <div class="section">
+        <p class="label">Customer</p>
+        <p>${order.customer_name}</p>
+        <p>${order.phone}</p>
+        ${order.email ? `<p>${order.email}</p>` : ''}
+        <p>${order.address}</p>
+      </div>
+      ${order.special_instructions ? `<div class="section"><p class="label">Special instructions</p><p>${order.special_instructions}</p></div>` : ''}
+      <table>
+        <thead><tr><th>Item</th><th style="text-align:center">Qty</th><th style="text-align:right">Amount</th></tr></thead>
+        <tbody>${itemsHtml}</tbody>
+      </table>
+      <p class="total">Total: $${t.toFixed(2)}</p>
+      <br>
+      <p style="font-size:0.85rem;color:#666">Payment: Cash on Delivery — ${order.payment_received ? 'Received' : 'Pending'}</p>
+      <script>window.onload=()=>window.print();<\/script>
+    </body></html>`);
+    win.document.close();
   }
 
   if (loading) return (
@@ -408,6 +465,23 @@ export default function OrderDetail() {
             </div>
           </div>
 
+          {/* Customer review (visible to admin if submitted) */}
+          {review && (
+            <div style={{ ...sectionStyle }}>
+              <p style={{ fontWeight: 600, fontSize: '0.85rem', color: '#555', marginBottom: '0.5rem' }}>Customer review</p>
+              <p style={{ fontSize: '1.2rem', letterSpacing: '0.05em', marginBottom: '0.3rem' }}>
+                {[1,2,3,4,5].map(n => (
+                  <span key={n} style={{ color: n <= review.rating ? '#f59e0b' : '#e5e7eb' }}>★</span>
+                ))}
+                <span style={{ fontSize: '0.82rem', color: '#999', marginLeft: '0.5rem' }}>{review.rating}/5</span>
+              </p>
+              {review.comment && <p style={{ fontSize: '0.9rem', color: '#444' }}>{review.comment}</p>}
+              <p style={{ fontSize: '0.75rem', color: '#bbb', marginTop: '0.35rem' }}>
+                {new Date(review.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </p>
+            </div>
+          )}
+
           {/* Actions */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>
             {next && (
@@ -440,6 +514,17 @@ export default function OrderDetail() {
                 Cancel order
               </button>
             )}
+
+            <button
+              onClick={printReceipt}
+              style={{
+                width: '100%', padding: '0.75rem',
+                background: '#f0f0eb', color: '#555',
+                borderRadius: 12, fontSize: '0.9rem', fontWeight: 500,
+              }}
+            >
+              Print packing slip
+            </button>
 
             {(order.status === 'Completed' || order.status === 'Cancelled') && (
               <button

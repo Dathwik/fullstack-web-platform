@@ -35,6 +35,15 @@ CREATE TABLE order_items (
   quantity_kg DECIMAL(5,2) NOT NULL
 );
 
+CREATE TABLE reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  rating SMALLINT NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  comment TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (order_id)
+);
+
 INSERT INTO products (name, price_per_kg) VALUES
   ('Spicy Mixture', 12.50),
   ('Khara Boondi', 9.00),

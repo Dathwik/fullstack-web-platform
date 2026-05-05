@@ -22,6 +22,7 @@ export default function Orders({ onLogout }) {
   const [loading, setLoading] = useState(true);
   const [newAlert, setNewAlert] = useState(false);
   const [stats, setStats] = useState(null);
+  const [lowStock, setLowStock] = useState([]);
   const navigate = useNavigate();
 
   // ISO timestamp recorded when this session started; orders newer than this are "new"
@@ -63,6 +64,7 @@ export default function Orders({ onLogout }) {
 
   useEffect(() => {
     api.get('/orders/stats').then(r => setStats(r.data)).catch(() => {});
+    api.get('/products/low-stock').then(r => setLowStock(r.data)).catch(() => {});
   }, []);
 
   async function advanceStatus(e, order) {
@@ -120,6 +122,25 @@ export default function Orders({ onLogout }) {
             New orders received
           </p>
           <span style={{ fontSize: '0.8rem', color: '#93c5fd' }}>Dismiss</span>
+        </div>
+      )}
+
+      {/* Low stock alert */}
+      {lowStock.length > 0 && (
+        <div
+          onClick={() => navigate('/products')}
+          style={{
+            background: '#fffbeb', border: '1.5px solid #fde68a',
+            borderRadius: 10, padding: '0.65rem 1rem',
+            marginBottom: '0.75rem', cursor: 'pointer',
+          }}
+        >
+          <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#92400e', marginBottom: '0.25rem' }}>
+            Low stock — {lowStock.length} product{lowStock.length > 1 ? 's' : ''} need restocking
+          </p>
+          <p style={{ fontSize: '0.78rem', color: '#b45309' }}>
+            {lowStock.map(p => `${p.name} (${parseFloat(p.stock_kg)}kg)`).join(' · ')}
+          </p>
         </div>
       )}
 
