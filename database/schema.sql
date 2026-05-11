@@ -15,6 +15,15 @@ CREATE TABLE products (
   stock_kg DECIMAL(8,2)
 );
 
+CREATE TABLE customers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email VARCHAR(150) NOT NULL UNIQUE,
+  password_hash VARCHAR(100) NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  phone VARCHAR(20),
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_name VARCHAR(100) NOT NULL,
@@ -24,9 +33,12 @@ CREATE TABLE orders (
   status order_status DEFAULT 'Received',
   payment_received BOOLEAN DEFAULT FALSE,
   special_instructions TEXT,
+  customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX orders_customer_id_idx ON orders(customer_id);
 
 CREATE TABLE order_items (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -43,6 +55,15 @@ CREATE TABLE reviews (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (order_id)
 );
+
+CREATE TABLE order_notes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  body TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX order_notes_order_id_idx ON order_notes(order_id);
 
 INSERT INTO products (name, price_per_kg) VALUES
   ('Spicy Mixture', 12.50),

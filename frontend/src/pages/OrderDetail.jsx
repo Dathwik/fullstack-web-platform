@@ -68,6 +68,12 @@ export default function OrderDetail() {
   const [editError, setEditError] = useState('');
   const [review, setReview] = useState(null);
 
+  // Internal notes
+  const [notes, setNotes] = useState([]);
+  const [noteDraft, setNoteDraft] = useState('');
+  const [noteSubmitting, setNoteSubmitting] = useState(false);
+  const [noteError, setNoteError] = useState('');
+
   async function fetchOrder() {
     try {
       const res = await api.get(`/orders/${id}`);
@@ -86,6 +92,39 @@ export default function OrderDetail() {
       .then(r => setReview(r.data))
       .catch(() => setReview(null));
   }, [id]);
+
+  async function fetchNotes() {
+    try {
+      const r = await api.get(`/orders/${id}/notes`);
+      setNotes(r.data);
+    } catch {
+      setNotes([]);
+    }
+  }
+  useEffect(() => { fetchNotes(); }, [id]);
+
+  async function addNote(e) {
+    e.preventDefault();
+    const body = noteDraft.trim();
+    if (!body) return;
+    setNoteError('');
+    setNoteSubmitting(true);
+    try {
+      await api.post(`/orders/${id}/notes`, { body });
+      setNoteDraft('');
+      await fetchNotes();
+    } catch (err) {
+      setNoteError(err.response?.data?.error || 'Failed to add note');
+    } finally {
+      setNoteSubmitting(false);
+    }
+  }
+
+  async function deleteNote(noteId) {
+    if (!confirm('Delete this note?')) return;
+    await api.delete(`/orders/${id}/notes/${noteId}`);
+    await fetchNotes();
+  }
 
   useEffect(() => {
     if (editing) {
@@ -481,6 +520,64 @@ export default function OrderDetail() {
               </p>
             </div>
           )}
+
+          {/* Internal notes (admin only) */}
+          <div style={sectionStyle}>
+            <p style={{ fontWeight: 600, fontSize: '0.85rem', color: '#555', marginBottom: '0.6rem' }}>
+              Internal notes
+            </p>
+            {notes.length === 0 && (
+              <p style={{ fontSize: '0.82rem', color: '#aaa', marginBottom: '0.6rem' }}>
+                No notes yet. Add one for the next person handling this order.
+              </p>
+            )}
+            {notes.map(n => (
+              <div key={n.id} style={{
+                background: '#fafaf7', border: '1px solid #eceae3', borderRadius: 8,
+                padding: '0.55rem 0.7rem', marginBottom: '0.4rem',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                  <span style={{ fontSize: '0.72rem', color: '#999' }}>
+                    {new Date(n.created_at).toLocaleString('en-US', {
+                      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+                    })}
+                  </span>
+                  <button
+                    onClick={() => deleteNote(n.id)}
+                    style={{ background: 'none', color: '#ccc', fontSize: '0.95rem', padding: '0 0.25rem' }}
+                  >×</button>
+                </div>
+                <p style={{ fontSize: '0.88rem', color: '#333', whiteSpace: 'pre-wrap' }}>{n.body}</p>
+              </div>
+            ))}
+            <form onSubmit={addNote} style={{ marginTop: '0.5rem' }}>
+              <textarea
+                value={noteDraft}
+                onChange={e => setNoteDraft(e.target.value)}
+                placeholder="Add a note (visible to staff only)"
+                rows={2}
+                maxLength={1000}
+                style={{
+                  width: '100%', padding: '0.6rem 0.75rem',
+                  border: '1.5px solid #ddd', borderRadius: 10,
+                  fontSize: '0.88rem', resize: 'vertical', marginBottom: '0.4rem',
+                }}
+              />
+              {noteError && <p style={{ color: '#d00', fontSize: '0.8rem', marginBottom: '0.4rem' }}>{noteError}</p>}
+              <button
+                type="submit"
+                disabled={noteSubmitting || !noteDraft.trim()}
+                style={{
+                  padding: '0.5rem 1rem', borderRadius: 8,
+                  background: '#1a1a1a', color: '#fff',
+                  fontSize: '0.85rem', fontWeight: 600,
+                  opacity: (noteSubmitting || !noteDraft.trim()) ? 0.5 : 1,
+                }}
+              >
+                {noteSubmitting ? 'Adding...' : 'Add note'}
+              </button>
+            </form>
+          </div>
 
           {/* Actions */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.5rem' }}>

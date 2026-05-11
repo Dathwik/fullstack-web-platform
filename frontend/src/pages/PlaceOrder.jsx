@@ -1,15 +1,22 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import api from '../api';
 
 export default function PlaceOrder() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const reorderItems = location.state?.reorderItems;
   const [products, setProducts] = useState([]);
+  const [customer, setCustomer] = useState(null);
   const [form, setForm] = useState({
     customer_name: '', phone: '', address: '',
     email: '', special_instructions: '',
   });
-  const [items, setItems] = useState([{ product_id: '', quantity_kg: 1 }]);
+  const [items, setItems] = useState(
+    reorderItems && reorderItems.length
+      ? reorderItems
+      : [{ product_id: '', quantity_kg: 1 }]
+  );
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -17,6 +24,17 @@ export default function PlaceOrder() {
     api.get('/products').then(r =>
       setProducts(r.data.filter(p => p.is_available && (p.stock_kg === null || parseFloat(p.stock_kg) > 0)))
     );
+    api.get('/customers/me').then(r => {
+      if (r.data) {
+        setCustomer(r.data);
+        setForm(f => ({
+          ...f,
+          customer_name: f.customer_name || r.data.name || '',
+          phone:         f.phone         || r.data.phone || '',
+          email:         f.email         || r.data.email || '',
+        }));
+      }
+    }).catch(() => {});
   }, []);
 
   function setField(field, value) {
@@ -76,6 +94,20 @@ export default function PlaceOrder() {
       <div style={{ marginBottom: '1.5rem' }}>
         <h1 style={{ fontSize: '1.4rem', fontWeight: 700, marginBottom: '0.25rem' }}>Place an Order</h1>
         <p style={{ fontSize: '0.9rem', color: '#888' }}>Fill in your details and we will deliver to you.</p>
+        {customer ? (
+          <p style={{ fontSize: '0.82rem', color: '#15803d', marginTop: '0.5rem' }}>
+            Signed in as <strong>{customer.name}</strong> · <Link to="/account" style={{ color: '#1a1a1a', fontWeight: 600 }}>My account</Link>
+          </p>
+        ) : (
+          <p style={{ fontSize: '0.82rem', color: '#888', marginTop: '0.5rem' }}>
+            Have an account? <Link to="/sign-in" style={{ color: '#1a1a1a', fontWeight: 600 }}>Sign in</Link> to save your details.
+          </p>
+        )}
+        {reorderItems && (
+          <p style={{ fontSize: '0.8rem', color: '#1d4ed8', marginTop: '0.5rem', background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: 8, padding: '0.4rem 0.6rem' }}>
+            Items pre-filled from your previous order — review the quantities and submit when ready.
+          </p>
+        )}
       </div>
 
       <form onSubmit={handleSubmit}>

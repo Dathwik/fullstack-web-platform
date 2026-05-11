@@ -20,10 +20,12 @@ app.use(session({
   },
 }));
 
-app.use('/api/auth',     require('./routes/auth'));
-app.use('/api/products', require('./routes/products'));
-app.use('/api/orders',   require('./routes/orders'));
-app.use('/api/reviews',  require('./routes/reviews'));
+app.use('/api/auth',              require('./routes/auth'));
+app.use('/api/customers',         require('./routes/customers'));
+app.use('/api/products',          require('./routes/products'));
+app.use('/api/orders/:id/notes',  require('./routes/notes'));
+app.use('/api/orders',            require('./routes/orders'));
+app.use('/api/reviews',           require('./routes/reviews'));
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });

@@ -272,10 +272,11 @@ router.post('/public', async (req, res) => {
 
     await client.query('BEGIN');
 
+    const customerId = req.session?.customer_id || null;
     const orderResult = await client.query(
-      `INSERT INTO orders (customer_name, phone, email, address, special_instructions)
-       VALUES ($1,$2,$3,$4,$5) RETURNING id, created_at`,
-      [customer_name, phone, email || null, address, special_instructions || null]
+      `INSERT INTO orders (customer_name, phone, email, address, special_instructions, customer_id)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at`,
+      [customer_name, phone, email || null, address, special_instructions || null, customerId]
     );
     const order = orderResult.rows[0];
 

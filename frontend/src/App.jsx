@@ -8,6 +8,9 @@ import OrderDetail from './pages/OrderDetail';
 import PlaceOrder from './pages/PlaceOrder';
 import OrderConfirmation from './pages/OrderConfirmation';
 import TrackOrder from './pages/TrackOrder';
+import CustomerLogin from './pages/CustomerLogin';
+import CustomerRegister from './pages/CustomerRegister';
+import CustomerDashboard from './pages/CustomerDashboard';
 import api from './api';
 
 export default function App() {
@@ -33,6 +36,9 @@ export default function App() {
         <Route path="/place-order"        element={<PlaceOrder />} />
         <Route path="/order-confirmation" element={<OrderConfirmation />} />
         <Route path="/track-order"        element={<TrackOrder />} />
+        <Route path="/sign-in"            element={<CustomerLogin />} />
+        <Route path="/register"           element={<CustomerRegister />} />
+        <Route path="/account"            element={<CustomerDashboard />} />
 
         {/* Protected routes */}
         {!authed ? (
