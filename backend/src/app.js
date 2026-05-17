@@ -8,6 +8,11 @@ const app = express();
 
 const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
 app.use(cors({ origin: corsOrigin, credentials: true }));
+
+// Stripe webhook must receive the raw body before express.json() parses it.
+const { webhookHandler } = require('./routes/payments');
+app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), webhookHandler);
+
 app.use(express.json());
 app.use(session({
   secret: process.env.SESSION_SECRET,
@@ -22,6 +27,7 @@ app.use(session({
 
 app.use('/api/auth',              require('./routes/auth'));
 app.use('/api/customers',         require('./routes/customers'));
+app.use('/api/payments',          require('./routes/payments'));
 app.use('/api/products',          require('./routes/products'));
 app.use('/api/orders/:id/notes',  require('./routes/notes'));
 app.use('/api/orders',            require('./routes/orders'));

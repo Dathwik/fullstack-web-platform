@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const requireAuth = require('../middleware/auth');
+const { sendOrderStatusEmail } = require('../services/mailer');
 
 const VALID_TRANSITIONS = {
   'Received':       ['In Preparation', 'Cancelled'],
@@ -264,19 +265,36 @@ async function insertItemsWithStockCheck(client, orderId, items) {
 router.post('/public', async (req, res) => {
   const client = await pool.connect();
   try {
-    const { customer_name, phone, address, email, special_instructions, items } = req.body;
+    const {
+      customer_name, phone, address, email, special_instructions, items,
+      payment_method, stripe_payment_intent_id,
+    } = req.body;
     if (!customer_name || !phone || !address)
       return res.status(400).json({ error: 'customer_name, phone, address required' });
     if (!items || items.length === 0)
       return res.status(400).json({ error: 'At least one item required' });
 
+    const method = payment_method === 'stripe' ? 'stripe' : 'cod';
+
+    // For Stripe orders the PaymentIntent must already be confirmed by the frontend
+    // before this endpoint is called — we just record the intent ID and the webhook
+    // will set payment_received=true when Stripe fires payment_intent.succeeded.
+    if (method === 'stripe' && !stripe_payment_intent_id)
+      return res.status(400).json({ error: 'stripe_payment_intent_id required for online payments' });
+
     await client.query('BEGIN');
 
     const customerId = req.session?.customer_id || null;
     const orderResult = await client.query(
-      `INSERT INTO orders (customer_name, phone, email, address, special_instructions, customer_id)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at`,
-      [customer_name, phone, email || null, address, special_instructions || null, customerId]
+      `INSERT INTO orders
+         (customer_name, phone, email, address, special_instructions, customer_id,
+          payment_method, stripe_payment_intent)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       RETURNING id, created_at`,
+      [
+        customer_name, phone, email || null, address, special_instructions || null,
+        customerId, method, method === 'stripe' ? stripe_payment_intent_id : null,
+      ]
     );
     const order = orderResult.rows[0];
 
@@ -342,7 +360,11 @@ router.patch('/:id/status', requireAuth, async (req, res) => {
       `UPDATE orders SET status=$1::order_status, updated_at=NOW() WHERE id=$2 RETURNING *`,
       [status, req.params.id]
     );
-    res.json(result.rows[0]);
+    const updatedOrder = result.rows[0];
+    res.json(updatedOrder);
+
+    // Fire-and-forget: send status notification email if the customer provided one.
+    sendOrderStatusEmail(updatedOrder, status);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

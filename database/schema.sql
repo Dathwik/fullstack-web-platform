@@ -34,6 +34,8 @@ CREATE TABLE orders (
   payment_received BOOLEAN DEFAULT FALSE,
   special_instructions TEXT,
   customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
+  payment_method VARCHAR(10) NOT NULL DEFAULT 'cod' CHECK (payment_method IN ('cod', 'stripe')),
+  stripe_payment_intent VARCHAR(100),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
