@@ -3,8 +3,14 @@ const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
 const path = require('path');
+const helmet = require('helmet');
 
 const app = express();
+
+// Security headers — must come before any routes.
+// contentSecurityPolicy is disabled so the production SPA can load inline scripts
+// and Stripe.js from external CDNs; all other helmet defaults are applied.
+app.use(helmet({ contentSecurityPolicy: false }));
 
 const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
 app.use(cors({ origin: corsOrigin, credentials: true }));

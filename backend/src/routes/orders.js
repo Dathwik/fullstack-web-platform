@@ -153,10 +153,41 @@ router.get('/track/:id', async (req, res) => {
   }
 });
 
-// GET /api/orders — list all orders with optional status + date filters
+// GET /api/orders/analytics — last 7 days of order counts and revenue by day
+router.get('/analytics', requireAuth, async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         gs.day::date AS date,
+         COUNT(DISTINCT o.id) AS orders,
+         COALESCE(SUM(oi.quantity_kg * p.price_per_kg), 0) AS revenue
+       FROM generate_series(
+         CURRENT_DATE - INTERVAL '6 days',
+         CURRENT_DATE,
+         '1 day'::interval
+       ) AS gs(day)
+       LEFT JOIN orders o
+         ON DATE(o.created_at) = gs.day::date
+        AND o.status <> 'Cancelled'
+       LEFT JOIN order_items oi ON oi.order_id = o.id
+       LEFT JOIN products p ON p.id = oi.product_id
+       GROUP BY gs.day
+       ORDER BY gs.day ASC`
+    );
+    res.json(result.rows.map(r => ({
+      date:    r.date,
+      orders:  parseInt(r.orders, 10),
+      revenue: parseFloat(r.revenue),
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/orders — list all orders with optional status + date + search filters
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const { status, date_from, date_to } = req.query;
+    const { status, date_from, date_to, search } = req.query;
     const params = [];
     const conditions = [];
 
@@ -171,6 +202,10 @@ router.get('/', requireAuth, async (req, res) => {
     if (date_to) {
       params.push(date_to);
       conditions.push(`o.created_at < ($${params.length}::date + interval '1 day')`);
+    }
+    if (search && search.trim()) {
+      params.push(`%${search.trim()}%`);
+      conditions.push(`(o.customer_name ILIKE $${params.length} OR o.phone LIKE $${params.length})`);
     }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';

@@ -14,20 +14,89 @@ const NEXT_STATUS = {
   'In Preparation': 'Completed',
 };
 
+const DAY_LABEL = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function RevenueChart({ data }) {
+  if (!data || data.length === 0) return null;
+  const maxRevenue = Math.max(...data.map(d => d.revenue), 1);
+  const BAR_H = 80;  // max bar height in px
+  const BAR_W = 28;
+  const GAP   = 8;
+  const PAD   = 16;
+  const W = data.length * (BAR_W + GAP) - GAP + PAD * 2;
+  const H = BAR_H + 48;
+
+  return (
+    <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 10, padding: '0.75rem 1rem', marginBottom: '1rem' }}>
+      <p style={{ fontSize: '0.72rem', color: '#999', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>
+        Revenue — last 7 days
+      </p>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ overflow: 'visible' }}>
+        {data.map((d, i) => {
+          const x = PAD + i * (BAR_W + GAP);
+          const barH = maxRevenue > 0 ? Math.max((d.revenue / maxRevenue) * BAR_H, d.revenue > 0 ? 3 : 0) : 0;
+          const y = BAR_H - barH;
+          const day = new Date(d.date + 'T12:00:00');
+          const isToday = d.date === new Date().toISOString().slice(0, 10);
+
+          return (
+            <g key={d.date}>
+              {/* bar */}
+              <rect
+                x={x} y={y} width={BAR_W} height={barH}
+                rx={4}
+                fill={isToday ? '#1a1a1a' : '#d4d4ce'}
+              />
+              {/* revenue label above bar */}
+              {d.revenue > 0 && (
+                <text
+                  x={x + BAR_W / 2} y={y - 4}
+                  textAnchor="middle" fontSize="8" fill="#555"
+                >
+                  ${d.revenue.toFixed(0)}
+                </text>
+              )}
+              {/* day label */}
+              <text
+                x={x + BAR_W / 2} y={BAR_H + 14}
+                textAnchor="middle" fontSize="9"
+                fill={isToday ? '#1a1a1a' : '#999'}
+                fontWeight={isToday ? '700' : '400'}
+              >
+                {DAY_LABEL[day.getDay()]}
+              </text>
+              {/* order count */}
+              {d.orders > 0 && (
+                <text
+                  x={x + BAR_W / 2} y={BAR_H + 26}
+                  textAnchor="middle" fontSize="8" fill="#bbb"
+                >
+                  {d.orders}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 export default function Orders({ onLogout }) {
   const [orders, setOrders] = useState([]);
   const [filter, setFilter] = useState('active');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [newAlert, setNewAlert] = useState(false);
   const [stats, setStats] = useState(null);
   const [lowStock, setLowStock] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
   const navigate = useNavigate();
 
-  // ISO timestamp recorded when this session started; orders newer than this are "new"
   const sessionStartRef = useRef(new Date().toISOString());
-  // Track whether we have already alerted for a given set of new orders
   const alertedCountRef = useRef(0);
 
   async function fetchOrders({ silent = false } = {}) {
@@ -35,10 +104,10 @@ export default function Orders({ onLogout }) {
       const params = {};
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo)   params.date_to   = dateTo;
+      if (search)   params.search    = search;
       const res = await api.get('/orders', { params });
       const newOrders = res.data;
 
-      // Count Received orders placed after the page loaded
       const newCount = newOrders.filter(
         o => o.status === 'Received' && o.created_at > sessionStartRef.current
       ).length;
@@ -55,16 +124,16 @@ export default function Orders({ onLogout }) {
     }
   }
 
-  // Initial load + restart polling whenever date filters change
   useEffect(() => {
     fetchOrders();
     const interval = setInterval(() => fetchOrders({ silent: true }), 30000);
     return () => clearInterval(interval);
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, search]);
 
   useEffect(() => {
     api.get('/orders/stats').then(r => setStats(r.data)).catch(() => {});
     api.get('/products/low-stock').then(r => setLowStock(r.data)).catch(() => {});
+    api.get('/orders/analytics').then(r => setAnalytics(r.data)).catch(() => {});
   }, []);
 
   async function advanceStatus(e, order) {
@@ -91,9 +160,18 @@ export default function Orders({ onLogout }) {
     setDateTo('');
   }
 
+  function clearSearch() {
+    setSearchInput('');
+    setSearch('');
+  }
+
+  function handleSearchSubmit(e) {
+    e.preventDefault();
+    setSearch(searchInput.trim());
+  }
+
   function dismissAlert() {
     setNewAlert(false);
-    // Move the session baseline forward so these orders are no longer "new"
     sessionStartRef.current = new Date().toISOString();
     alertedCountRef.current = 0;
   }
@@ -161,6 +239,9 @@ export default function Orders({ onLogout }) {
         </div>
       )}
 
+      {/* 7-day revenue chart */}
+      <RevenueChart data={analytics} />
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h1 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Orders</h1>
@@ -185,6 +266,41 @@ export default function Orders({ onLogout }) {
           </button>
         </div>
       </div>
+
+      {/* Search bar */}
+      <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
+        <input
+          value={searchInput}
+          onChange={e => setSearchInput(e.target.value)}
+          placeholder="Search by name or phone…"
+          style={{
+            flex: 1, padding: '0.45rem 0.75rem',
+            border: '1.5px solid #ddd', borderRadius: 8, fontSize: '0.85rem',
+          }}
+        />
+        {search ? (
+          <button
+            type="button"
+            onClick={clearSearch}
+            style={{ padding: '0.45rem 0.75rem', borderRadius: 8, background: '#f0f0eb', color: '#555', fontSize: '0.82rem' }}
+          >
+            Clear
+          </button>
+        ) : (
+          <button
+            type="submit"
+            style={{ padding: '0.45rem 0.75rem', borderRadius: 8, background: '#1a1a1a', color: '#fff', fontSize: '0.82rem', fontWeight: 600 }}
+          >
+            Search
+          </button>
+        )}
+      </form>
+
+      {search && (
+        <p style={{ fontSize: '0.78rem', color: '#888', marginBottom: '0.5rem' }}>
+          Showing results for "{search}"
+        </p>
+      )}
 
       {/* Status filter tabs */}
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>

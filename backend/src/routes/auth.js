@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
+const loginLimiter = require('../middleware/rateLimiter');
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   const { password } = req.body;
   const hash = process.env.ADMIN_PASSWORD_HASH;
   if (!hash) return res.status(500).json({ error: 'Server misconfigured: ADMIN_PASSWORD_HASH not set' });

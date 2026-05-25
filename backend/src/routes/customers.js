@@ -3,11 +3,12 @@ const router = express.Router();
 const bcrypt = require('bcryptjs');
 const pool = require('../db');
 const requireCustomer = require('../middleware/customerAuth');
+const loginLimiter = require('../middleware/rateLimiter');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // POST /api/customers/register — public, creates account and signs the customer in
-router.post('/register', async (req, res) => {
+router.post('/register', loginLimiter, async (req, res) => {
   try {
     const { email, password, name, phone } = req.body;
     if (!email || !password || !name)
@@ -35,7 +36,7 @@ router.post('/register', async (req, res) => {
 });
 
 // POST /api/customers/login — public, verifies credentials and sets session
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password)
