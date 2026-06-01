@@ -623,6 +623,20 @@ export default function OrderDetail() {
               Print packing slip
             </button>
 
+            <a
+              href={`/api/orders/${order.id}/invoice`}
+              download
+              style={{
+                display: 'block', width: '100%', padding: '0.75rem',
+                background: '#f0f0eb', color: '#555',
+                borderRadius: 12, fontSize: '0.9rem', fontWeight: 500,
+                textAlign: 'center', textDecoration: 'none',
+                boxSizing: 'border-box',
+              }}
+            >
+              Download invoice PDF
+            </a>
+
             {(order.status === 'Completed' || order.status === 'Cancelled') && (
               <button
                 onClick={deleteOrder}

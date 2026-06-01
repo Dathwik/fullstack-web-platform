@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const PDFDocument = require('pdfkit');
 const pool = require('../db');
 const requireAuth = require('../middleware/auth');
 const { sendOrderStatusEmail } = require('../services/mailer');
@@ -86,7 +87,7 @@ router.get('/new-since', requireAuth, async (req, res) => {
 // GET /api/orders/stats — summary metrics for the admin dashboard
 router.get('/stats', requireAuth, async (_req, res) => {
   try {
-    const [todayRes, pendingRes, weekRes, unpaidRes] = await Promise.all([
+    const [todayRes, pendingRes, weekRes, unpaidRes, agingRes] = await Promise.all([
       pool.query(
         `SELECT COUNT(DISTINCT o.id) AS count,
                 COALESCE(SUM(oi.quantity_kg * p.price_per_kg), 0) AS revenue
@@ -111,6 +112,11 @@ router.get('/stats', requireAuth, async (_req, res) => {
         `SELECT COUNT(*) AS count FROM orders
          WHERE payment_received = FALSE AND status <> 'Cancelled'`
       ),
+      pool.query(
+        `SELECT COUNT(*) AS count FROM orders
+         WHERE status = 'Received'
+           AND created_at < NOW() - INTERVAL '4 hours'`
+      ),
     ]);
 
     res.json({
@@ -118,6 +124,7 @@ router.get('/stats', requireAuth, async (_req, res) => {
       pending: { count: parseInt(pendingRes.rows[0].count, 10) },
       week:    { count: parseInt(weekRes.rows[0].count, 10),    revenue: parseFloat(weekRes.rows[0].revenue) },
       unpaid:  { count: parseInt(unpaidRes.rows[0].count, 10) },
+      aging:   { count: parseInt(agingRes.rows[0].count, 10) },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -187,7 +194,7 @@ router.get('/analytics', requireAuth, async (_req, res) => {
 // GET /api/orders — list all orders with optional status + date + search filters
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const { status, date_from, date_to, search } = req.query;
+    const { status, date_from, date_to, search, aging } = req.query;
     const params = [];
     const conditions = [];
 
@@ -206,6 +213,9 @@ router.get('/', requireAuth, async (req, res) => {
     if (search && search.trim()) {
       params.push(`%${search.trim()}%`);
       conditions.push(`(o.customer_name ILIKE $${params.length} OR o.phone LIKE $${params.length})`);
+    }
+    if (aging === 'true') {
+      conditions.push(`(o.status = 'Received' AND o.created_at < NOW() - INTERVAL '4 hours')`);
     }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
@@ -232,6 +242,133 @@ router.get('/', requireAuth, async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/orders/:id/invoice — download a PDF invoice for the order (auth required)
+router.get('/:id/invoice', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT o.*,
+         COALESCE(json_agg(
+           json_build_object(
+             'product_name', p.name,
+             'price_per_kg', p.price_per_kg,
+             'quantity_kg', oi.quantity_kg
+           )
+         ) FILTER (WHERE oi.id IS NOT NULL), '[]') AS items
+       FROM orders o
+       LEFT JOIN order_items oi ON oi.order_id = o.id
+       LEFT JOIN products p ON p.id = oi.product_id
+       WHERE o.id = $1
+       GROUP BY o.id`,
+      [req.params.id]
+    );
+    if (!result.rows.length)
+      return res.status(404).json({ error: 'Order not found' });
+
+    const order = result.rows[0];
+    const total = order.items.reduce(
+      (s, i) => s + parseFloat(i.quantity_kg) * parseFloat(i.price_per_kg), 0
+    );
+    const shortId = order.id.slice(0, 8).toUpperCase();
+    const placedAt = new Date(order.created_at).toLocaleString('en-US', {
+      month: 'long', day: 'numeric', year: 'numeric',
+      hour: 'numeric', minute: '2-digit', hour12: true,
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="invoice-${shortId}.pdf"`);
+
+    const doc = new PDFDocument({ margin: 50, size: 'A4' });
+    doc.pipe(res);
+
+    // Header
+    doc.fontSize(20).font('Helvetica-Bold').text('INVOICE', { align: 'right' });
+    doc.fontSize(10).font('Helvetica').fillColor('#888')
+       .text('Spice & Crunch Foods', { align: 'right' })
+       .text('support@spiceandcrunch.com', { align: 'right' });
+    doc.moveDown(1.5);
+
+    // Divider
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e0e0e0').stroke();
+    doc.moveDown(0.75);
+
+    // Order meta
+    doc.fillColor('#333').fontSize(9).font('Helvetica-Bold').text('ORDER NUMBER');
+    doc.fontSize(13).font('Helvetica-Bold').fillColor('#1a1a1a').text(`#${shortId}`);
+    doc.moveDown(0.3);
+    doc.fontSize(9).font('Helvetica').fillColor('#888').text(`Placed: ${placedAt}`);
+    doc.fontSize(9).fillColor(order.status === 'Completed' ? '#15803d' : '#b45309')
+       .text(`Status: ${order.status}`);
+    doc.moveDown(1);
+
+    // Bill-to block
+    doc.fillColor('#888').fontSize(9).font('Helvetica-Bold').text('BILL TO');
+    doc.fillColor('#1a1a1a').fontSize(10).font('Helvetica')
+       .text(order.customer_name)
+       .text(order.phone);
+    if (order.email) doc.text(order.email);
+    doc.text(order.address);
+    if (order.special_instructions) {
+      doc.moveDown(0.4);
+      doc.fillColor('#888').fontSize(8).text('Special instructions:');
+      doc.fillColor('#555').fontSize(9).text(order.special_instructions);
+    }
+    doc.moveDown(1.25);
+
+    // Items table header
+    const COL = { item: 50, qty: 330, rate: 390, amount: 470 };
+    doc.fillColor('#1a1a1a').fontSize(9).font('Helvetica-Bold');
+    doc.text('ITEM', COL.item, doc.y);
+    doc.text('QTY (kg)', COL.qty, doc.y - doc.currentLineHeight(), { width: 55, align: 'right' });
+    doc.text('RATE/kg', COL.rate, doc.y - doc.currentLineHeight(), { width: 70, align: 'right' });
+    doc.text('AMOUNT', COL.amount, doc.y - doc.currentLineHeight(), { width: 75, align: 'right' });
+    doc.moveDown(0.3);
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#333').lineWidth(1).stroke();
+    doc.moveDown(0.4);
+
+    // Items rows
+    doc.font('Helvetica').fontSize(10).fillColor('#1a1a1a');
+    for (const item of order.items) {
+      const subtotal = parseFloat(item.quantity_kg) * parseFloat(item.price_per_kg);
+      const rowY = doc.y;
+      doc.text(item.product_name, COL.item, rowY, { width: 265 });
+      doc.text(parseFloat(item.quantity_kg).toFixed(2), COL.qty, rowY, { width: 55, align: 'right' });
+      doc.text(`$${parseFloat(item.price_per_kg).toFixed(2)}`, COL.rate, rowY, { width: 70, align: 'right' });
+      doc.text(`$${subtotal.toFixed(2)}`, COL.amount, rowY, { width: 75, align: 'right' });
+      doc.moveDown(0.6);
+    }
+
+    // Total
+    doc.moveDown(0.2);
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e0e0e0').lineWidth(0.5).stroke();
+    doc.moveDown(0.5);
+    const totalY = doc.y;
+    doc.font('Helvetica-Bold').fontSize(11).fillColor('#1a1a1a');
+    doc.text('TOTAL', COL.rate, totalY, { width: 70, align: 'right' });
+    doc.text(`$${total.toFixed(2)}`, COL.amount, totalY, { width: 75, align: 'right' });
+    doc.moveDown(1.5);
+
+    // Payment status
+    doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e0e0e0').lineWidth(0.5).stroke();
+    doc.moveDown(0.6);
+    doc.font('Helvetica').fontSize(9).fillColor('#888').text('Payment method: ');
+    const payMethod = order.payment_method === 'stripe' ? 'Online (Card)' : 'Cash on Delivery';
+    const payStatus = order.payment_received ? 'PAID' : 'PENDING';
+    const payColor  = order.payment_received ? '#15803d' : '#b45309';
+    doc.moveUp();
+    doc.fontSize(9).fillColor('#555').text(`${payMethod}  `, { continued: true });
+    doc.fillColor(payColor).font('Helvetica-Bold').text(payStatus);
+
+    // Footer
+    doc.moveDown(3);
+    doc.fillColor('#bbb').fontSize(8).font('Helvetica')
+       .text('Thank you for your order!', { align: 'center' });
+
+    doc.end();
+  } catch (err) {
+    if (!res.headersSent) res.status(500).json({ error: err.message });
   }
 });
 

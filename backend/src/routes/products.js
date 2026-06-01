@@ -19,6 +19,41 @@ router.get('/low-stock', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/products/analytics?days=30 — sales breakdown per product (auth required)
+router.get('/analytics', requireAuth, async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days, 10) || 30, 365);
+    const result = await pool.query(
+      `SELECT
+         p.id,
+         p.name,
+         p.price_per_kg,
+         COUNT(DISTINCT oi.order_id)            AS total_orders,
+         COALESCE(SUM(oi.quantity_kg), 0)       AS total_quantity_kg,
+         COALESCE(SUM(oi.quantity_kg * p.price_per_kg), 0) AS total_revenue
+       FROM products p
+       LEFT JOIN order_items oi ON oi.product_id = p.id
+       LEFT JOIN orders o
+         ON o.id = oi.order_id
+        AND o.status <> 'Cancelled'
+        AND o.created_at >= CURRENT_DATE - ($1 || ' days')::interval
+       GROUP BY p.id
+       ORDER BY total_revenue DESC`,
+      [days]
+    );
+    res.json(result.rows.map(r => ({
+      id:                r.id,
+      name:              r.name,
+      price_per_kg:      parseFloat(r.price_per_kg),
+      total_orders:      parseInt(r.total_orders, 10),
+      total_quantity_kg: parseFloat(r.total_quantity_kg),
+      total_revenue:     parseFloat(r.total_revenue),
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/products — public, used to populate order forms
 router.get('/', async (req, res) => {
   try {

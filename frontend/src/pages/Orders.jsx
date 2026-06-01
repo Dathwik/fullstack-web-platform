@@ -102,9 +102,10 @@ export default function Orders({ onLogout }) {
   async function fetchOrders({ silent = false } = {}) {
     try {
       const params = {};
-      if (dateFrom) params.date_from = dateFrom;
-      if (dateTo)   params.date_to   = dateTo;
-      if (search)   params.search    = search;
+      if (dateFrom)        params.date_from = dateFrom;
+      if (dateTo)          params.date_to   = dateTo;
+      if (search)          params.search    = search;
+      if (filter === 'aging') params.aging  = 'true';
       const res = await api.get('/orders', { params });
       const newOrders = res.data;
 
@@ -128,7 +129,7 @@ export default function Orders({ onLogout }) {
     fetchOrders();
     const interval = setInterval(() => fetchOrders({ silent: true }), 30000);
     return () => clearInterval(interval);
-  }, [dateFrom, dateTo, search]);
+  }, [dateFrom, dateTo, search, filter]);
 
   useEffect(() => {
     api.get('/orders/stats').then(r => setStats(r.data)).catch(() => {});
@@ -179,7 +180,7 @@ export default function Orders({ onLogout }) {
   const filtered = orders.filter(o => {
     if (filter === 'active') return o.status === 'Received' || o.status === 'In Preparation';
     if (filter === 'done')   return o.status === 'Completed' || o.status === 'Cancelled';
-    return true;
+    return true; // 'all' and 'aging' (already filtered server-side)
   });
 
   return (
@@ -200,6 +201,24 @@ export default function Orders({ onLogout }) {
             New orders received
           </p>
           <span style={{ fontSize: '0.8rem', color: '#93c5fd' }}>Dismiss</span>
+        </div>
+      )}
+
+      {/* Aging orders alert */}
+      {stats?.aging?.count > 0 && filter !== 'aging' && (
+        <div
+          onClick={() => setFilter('aging')}
+          style={{
+            background: '#fff7e6', border: '1.5px solid #fcd34d',
+            borderRadius: 10, padding: '0.65rem 1rem',
+            marginBottom: '0.75rem', cursor: 'pointer',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}
+        >
+          <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#92400e' }}>
+            {stats.aging.count} order{stats.aging.count > 1 ? 's' : ''} waiting &gt;4 hours — tap to review
+          </p>
+          <span style={{ fontSize: '0.78rem', color: '#b45309' }}>View</span>
         </div>
       )}
 
@@ -303,8 +322,8 @@ export default function Orders({ onLogout }) {
       )}
 
       {/* Status filter tabs */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
-        {[['active','Active'],['done','Done'],['all','All']].map(([val, label]) => (
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+        {[['active','Active'],['done','Done'],['all','All'],['aging','Aging']].map(([val, label]) => (
           <button key={val} onClick={() => setFilter(val)} style={{
             padding: '0.4rem 0.85rem', borderRadius: 20,
             background: filter === val ? '#1a1a1a' : '#f0f0eb',
@@ -312,6 +331,16 @@ export default function Orders({ onLogout }) {
             fontSize: '0.85rem', fontWeight: 500,
           }}>
             {label}
+            {val === 'aging' && stats?.aging?.count > 0 && (
+              <span style={{
+                marginLeft: '0.3rem', fontSize: '0.72rem', fontWeight: 700,
+                background: filter === 'aging' ? 'rgba(255,255,255,0.25)' : '#fcd34d',
+                color: filter === 'aging' ? '#fff' : '#92400e',
+                padding: '0.05rem 0.35rem', borderRadius: 10,
+              }}>
+                {stats.aging.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
