@@ -67,6 +67,16 @@ CREATE TABLE order_notes (
 
 CREATE INDEX order_notes_order_id_idx ON order_notes(order_id);
 
+CREATE TABLE webhook_events (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  event_id   VARCHAR(100) NOT NULL UNIQUE,
+  event_type VARCHAR(50)  NOT NULL,
+  payload    JSONB        NOT NULL,
+  created_at TIMESTAMPTZ  DEFAULT NOW()
+);
+
+CREATE INDEX webhook_events_created_at_idx ON webhook_events(created_at DESC);
+
 INSERT INTO products (name, price_per_kg) VALUES
   ('Spicy Mixture', 12.50),
   ('Khara Boondi', 9.00),

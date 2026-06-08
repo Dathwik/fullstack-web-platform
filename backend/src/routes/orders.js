@@ -160,6 +160,87 @@ router.get('/track/:id', async (req, res) => {
   }
 });
 
+// PATCH /api/orders/bulk-status — advance or cancel multiple orders at once (auth required)
+router.patch('/bulk-status', requireAuth, async (req, res) => {
+  try {
+    const { order_ids, status } = req.body;
+    if (!Array.isArray(order_ids) || order_ids.length === 0)
+      return res.status(400).json({ error: 'order_ids must be a non-empty array' });
+    if (!['In Preparation', 'Cancelled'].includes(status))
+      return res.status(400).json({ error: 'Bulk status update only supports "In Preparation" or "Cancelled"' });
+
+    // Only orders currently in a state that allows this transition are updated;
+    // the rest are silently skipped — single UPDATE statement is atomic so either
+    // all qualifying rows are committed or none (no partial failure possible).
+    const validFrom = status === 'In Preparation' ? ['Received'] : ['Received'];
+    const result = await pool.query(
+      `UPDATE orders
+         SET status = $1::order_status, updated_at = NOW()
+       WHERE id = ANY($2::uuid[])
+         AND status = ANY($3::order_status[])
+       RETURNING id`,
+      [status, order_ids, validFrom]
+    );
+
+    const updatedIds = new Set(result.rows.map(r => r.id));
+    const skipped    = order_ids.filter(id => !updatedIds.has(id));
+
+    res.json({ updated: result.rows.length, skipped: skipped.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/orders/top-customers?limit=10&days=90 — top customers by total spend (auth required)
+router.get('/top-customers', requireAuth, async (req, res) => {
+  try {
+    const days  = Math.min(parseInt(req.query.days,  10) || 90,  365);
+    const limit = Math.min(parseInt(req.query.limit, 10) || 10,   50);
+
+    const result = await pool.query(
+      `WITH customer_totals AS (
+         SELECT
+           o.phone,
+           MAX(o.customer_name)                        AS customer_name,
+           MAX(o.customer_id)                          AS customer_id,
+           COUNT(DISTINCT o.id)                        AS total_orders,
+           COALESCE(SUM(oi.quantity_kg * p.price_per_kg), 0) AS total_revenue,
+           MAX(o.created_at)                           AS last_order_at
+         FROM orders o
+         LEFT JOIN order_items oi ON oi.order_id = o.id
+         LEFT JOIN products p     ON p.id = oi.product_id
+         WHERE o.status <> 'Cancelled'
+           AND o.created_at >= CURRENT_DATE - ($1 || ' days')::interval
+         GROUP BY o.phone
+       )
+       SELECT
+         phone,
+         customer_name,
+         customer_id,
+         total_orders,
+         total_revenue,
+         last_order_at,
+         RANK() OVER (ORDER BY total_revenue DESC) AS rank
+       FROM customer_totals
+       ORDER BY total_revenue DESC
+       LIMIT $2`,
+      [days, limit]
+    );
+
+    res.json(result.rows.map(r => ({
+      phone:          r.phone,
+      customer_name:  r.customer_name,
+      customer_id:    r.customer_id,
+      total_orders:   parseInt(r.total_orders,  10),
+      total_revenue:  parseFloat(r.total_revenue),
+      last_order_at:  r.last_order_at,
+      rank:           parseInt(r.rank, 10),
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/orders/analytics — last 7 days of order counts and revenue by day
 router.get('/analytics', requireAuth, async (_req, res) => {
   try {

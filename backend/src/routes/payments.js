@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const requireAuth = require('../middleware/auth');
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -65,7 +66,23 @@ async function webhookHandler(req, res) {
     return res.status(400).json({ error: `Webhook signature verification failed: ${err.message}` });
   }
 
-  if (event.type === 'payment_intent.succeeded') {
+  // Idempotency: log the event; if event_id already exists this is a Stripe retry —
+  // ON CONFLICT DO NOTHING returns 0 rows, so we skip re-processing safely.
+  let isNew = true;
+  try {
+    const logResult = await pool.query(
+      `INSERT INTO webhook_events (event_id, event_type, payload)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (event_id) DO NOTHING
+       RETURNING id`,
+      [event.id, event.type, JSON.stringify(event)]
+    );
+    isNew = logResult.rowCount > 0;
+  } catch (err) {
+    console.error('Webhook log insert failed:', err.message);
+  }
+
+  if (isNew && event.type === 'payment_intent.succeeded') {
     const pi = event.data.object;
     try {
       await pool.query(
@@ -80,6 +97,26 @@ async function webhookHandler(req, res) {
 
   res.json({ received: true });
 }
+
+// GET /api/payments/webhook-events — last 20 Stripe webhook events (admin only)
+router.get('/webhook-events', requireAuth, async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         id,
+         event_id,
+         event_type,
+         payload->'data'->'object'->>'id' AS object_id,
+         created_at
+       FROM webhook_events
+       ORDER BY created_at DESC
+       LIMIT 20`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = router;
 module.exports.webhookHandler = webhookHandler;

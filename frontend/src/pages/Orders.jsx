@@ -94,6 +94,12 @@ export default function Orders({ onLogout }) {
   const [stats, setStats] = useState(null);
   const [lowStock, setLowStock] = useState([]);
   const [analytics, setAnalytics] = useState(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkWorking, setBulkWorking] = useState(false);
+  const [topCustomers, setTopCustomers] = useState(null);
+  const [showTopCustomers, setShowTopCustomers] = useState(false);
+  const [webhookEvents, setWebhookEvents] = useState([]);
   const navigate = useNavigate();
 
   const sessionStartRef = useRef(new Date().toISOString());
@@ -135,6 +141,7 @@ export default function Orders({ onLogout }) {
     api.get('/orders/stats').then(r => setStats(r.data)).catch(() => {});
     api.get('/products/low-stock').then(r => setLowStock(r.data)).catch(() => {});
     api.get('/orders/analytics').then(r => setAnalytics(r.data)).catch(() => {});
+    api.get('/payments/webhook-events').then(r => setWebhookEvents(r.data)).catch(() => {});
   }, []);
 
   async function advanceStatus(e, order) {
@@ -150,6 +157,58 @@ export default function Orders({ onLogout }) {
     if (!confirm('Cancel this order?')) return;
     await api.patch(`/orders/${order.id}/status`, { status: 'Cancelled' });
     fetchOrders({ silent: true });
+  }
+
+  async function loadTopCustomers() {
+    if (topCustomers) { setShowTopCustomers(s => !s); return; }
+    const res = await api.get('/orders/top-customers', { params: { limit: 5, days: 90 } });
+    setTopCustomers(res.data);
+    setShowTopCustomers(true);
+  }
+
+  function toggleSelect(e, id) {
+    e.stopPropagation();
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+
+  async function bulkAdvance() {
+    if (!selectedIds.size) return;
+    setBulkWorking(true);
+    try {
+      await api.patch('/orders/bulk-status', {
+        order_ids: [...selectedIds],
+        status: 'In Preparation',
+      });
+      exitSelectMode();
+      fetchOrders({ silent: true });
+    } finally {
+      setBulkWorking(false);
+    }
+  }
+
+  async function bulkCancel() {
+    if (!selectedIds.size) return;
+    if (!confirm(`Cancel ${selectedIds.size} order${selectedIds.size > 1 ? 's' : ''}?`)) return;
+    setBulkWorking(true);
+    try {
+      await api.patch('/orders/bulk-status', {
+        order_ids: [...selectedIds],
+        status: 'Cancelled',
+      });
+      exitSelectMode();
+      fetchOrders({ silent: true });
+    } finally {
+      setBulkWorking(false);
+    }
   }
 
   function handleExport() {
@@ -261,6 +320,75 @@ export default function Orders({ onLogout }) {
       {/* 7-day revenue chart */}
       <RevenueChart data={analytics} />
 
+      {/* Top customers */}
+      <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 10, marginBottom: '1rem', overflow: 'hidden' }}>
+        <button
+          onClick={loadTopCustomers}
+          style={{
+            width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            padding: '0.65rem 1rem', background: 'none', textAlign: 'left',
+          }}
+        >
+          <p style={{ fontSize: '0.72rem', color: '#999', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Top customers — last 90 days
+          </p>
+          <span style={{ fontSize: '0.8rem', color: '#bbb' }}>{showTopCustomers ? '▲' : '▼'}</span>
+        </button>
+        {showTopCustomers && topCustomers && (
+          <div style={{ borderTop: '1px solid #f0f0eb' }}>
+            {topCustomers.length === 0 ? (
+              <p style={{ padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#aaa' }}>No data yet.</p>
+            ) : topCustomers.map((c, i) => (
+              <div key={c.phone} style={{
+                display: 'grid', gridTemplateColumns: '20px 1fr auto',
+                gap: '0.5rem', padding: '0.6rem 1rem', alignItems: 'center',
+                borderBottom: i < topCustomers.length - 1 ? '1px solid #f0f0eb' : 'none',
+              }}>
+                <span style={{ fontSize: '0.75rem', color: '#ccc', fontWeight: 700 }}>#{c.rank}</span>
+                <div>
+                  <p style={{ fontSize: '0.88rem', fontWeight: 600, color: '#1a1a1a' }}>{c.customer_name}</p>
+                  <p style={{ fontSize: '0.75rem', color: '#aaa' }}>
+                    {c.phone} · {c.total_orders} order{c.total_orders > 1 ? 's' : ''} · last {new Date(c.last_order_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </p>
+                </div>
+                <p style={{ fontSize: '0.9rem', fontWeight: 700, color: '#1a1a1a' }}>
+                  ${c.total_revenue.toFixed(2)}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Recent Stripe webhook events */}
+      {webhookEvents.length > 0 && (
+        <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 10, padding: '0.65rem 1rem', marginBottom: '1rem' }}>
+          <p style={{ fontSize: '0.72rem', color: '#999', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>
+            Recent payment events
+          </p>
+          {webhookEvents.slice(0, 5).map(ev => (
+            <div key={ev.id} style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '0.3rem 0', borderBottom: '1px solid #f5f5f0',
+            }}>
+              <div>
+                <p style={{ fontSize: '0.8rem', fontWeight: 600, color: ev.event_type === 'payment_intent.succeeded' ? '#15803d' : '#555' }}>
+                  {ev.event_type}
+                </p>
+                {ev.object_id && (
+                  <p style={{ fontSize: '0.72rem', color: '#bbb', fontFamily: 'monospace' }}>
+                    {ev.object_id.slice(0, 20)}…
+                  </p>
+                )}
+              </div>
+              <p style={{ fontSize: '0.72rem', color: '#bbb' }}>
+                {new Date(ev.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h1 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Orders</h1>
@@ -276,6 +404,16 @@ export default function Orders({ onLogout }) {
             style={{ padding: '0.5rem 0.85rem', borderRadius: 8, background: '#f0f0eb', fontSize: '0.85rem', fontWeight: 500 }}
           >
             Products
+          </button>
+          <button
+            onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}
+            style={{
+              padding: '0.5rem 0.85rem', borderRadius: 8, fontSize: '0.85rem', fontWeight: 500,
+              background: selectMode ? '#fef2f2' : '#f0f0eb',
+              color:      selectMode ? '#b91c1c' : '#555',
+            }}
+          >
+            {selectMode ? 'Cancel' : 'Select'}
           </button>
           <button
             onClick={() => navigate('/new-order')}
@@ -378,20 +516,33 @@ export default function Orders({ onLogout }) {
           const sc = STATUS_COLORS[order.status];
           const next = NEXT_STATUS[order.status];
           const total = order.items?.reduce((sum, i) => sum + i.quantity_kg * i.price_per_kg, 0) ?? 0;
+          const isSelected = selectedIds.has(order.id);
           return (
             <div
               key={order.id}
-              onClick={() => navigate(`/orders/${order.id}`)}
+              onClick={() => selectMode ? toggleSelect({ stopPropagation: () => {} }, order.id) : navigate(`/orders/${order.id}`)}
               style={{
-                background: '#fff', border: '1.5px solid #e8e8e3',
+                background: isSelected ? '#f0f7ff' : '#fff',
+                border: `1.5px solid ${isSelected ? '#93c5fd' : '#e8e8e3'}`,
                 borderRadius: 12, padding: '1rem',
                 marginBottom: '0.75rem', cursor: 'pointer',
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                <div>
-                  <p style={{ fontWeight: 600, fontSize: '1rem' }}>{order.customer_name}</p>
-                  <p style={{ fontSize: '0.8rem', color: '#888', marginTop: '0.1rem' }}>{order.phone}</p>
+                <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start' }}>
+                  {selectMode && (
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={e => toggleSelect(e, order.id)}
+                      onClick={e => e.stopPropagation()}
+                      style={{ marginTop: '0.2rem', width: 16, height: 16, cursor: 'pointer', accentColor: '#1a1a1a' }}
+                    />
+                  )}
+                  <div>
+                    <p style={{ fontWeight: 600, fontSize: '1rem' }}>{order.customer_name}</p>
+                    <p style={{ fontSize: '0.8rem', color: '#888', marginTop: '0.1rem' }}>{order.phone}</p>
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
                   {order.payment_received && (
@@ -419,7 +570,7 @@ export default function Orders({ onLogout }) {
                   ${total.toFixed(2)}
                 </p>
                 <div style={{ display: 'flex', gap: '0.4rem' }}>
-                  {order.status === 'Received' && (
+                  {!selectMode && order.status === 'Received' && (
                     <button onClick={e => cancelOrder(e, order)} style={{
                       padding: '0.35rem 0.65rem', borderRadius: 7,
                       background: '#fef2f2', color: '#b91c1c',
@@ -428,7 +579,7 @@ export default function Orders({ onLogout }) {
                       Cancel
                     </button>
                   )}
-                  {next && (
+                  {!selectMode && next && (
                     <button onClick={e => advanceStatus(e, order)} style={{
                       padding: '0.35rem 0.65rem', borderRadius: 7,
                       background: '#1a1a1a', color: '#fff',
@@ -442,6 +593,41 @@ export default function Orders({ onLogout }) {
             </div>
           );
         })
+      )}
+
+      {/* Bulk action bar (floats at bottom when orders are selected) */}
+      {selectMode && selectedIds.size > 0 && (
+        <div style={{
+          position: 'fixed', bottom: '1.25rem', left: '50%', transform: 'translateX(-50%)',
+          background: '#1a1a1a', borderRadius: 14, padding: '0.75rem 1rem',
+          display: 'flex', gap: '0.6rem', alignItems: 'center',
+          boxShadow: '0 4px 24px rgba(0,0,0,0.18)', zIndex: 100,
+          maxWidth: 420, width: 'calc(100% - 2rem)',
+        }}>
+          <p style={{ fontSize: '0.85rem', color: '#fff', fontWeight: 600, flex: 1 }}>
+            {selectedIds.size} selected
+          </p>
+          <button
+            onClick={bulkAdvance}
+            disabled={bulkWorking}
+            style={{ padding: '0.45rem 0.85rem', borderRadius: 8, background: '#fff', color: '#1a1a1a', fontSize: '0.82rem', fontWeight: 700, opacity: bulkWorking ? 0.6 : 1 }}
+          >
+            Start all
+          </button>
+          <button
+            onClick={bulkCancel}
+            disabled={bulkWorking}
+            style={{ padding: '0.45rem 0.85rem', borderRadius: 8, background: '#fef2f2', color: '#b91c1c', fontSize: '0.82rem', fontWeight: 600, opacity: bulkWorking ? 0.6 : 1 }}
+          >
+            Cancel all
+          </button>
+          <button
+            onClick={exitSelectMode}
+            style={{ color: '#888', background: 'none', fontSize: '1rem', padding: '0.2rem 0.4rem' }}
+          >
+            ×
+          </button>
+        </div>
       )}
 
       {/* Logout */}
