@@ -8,6 +8,66 @@ const SORT_OPTIONS = [
   { key: 'orders',   label: 'Orders' },
 ];
 
+const MOVEMENT_TYPE_LABEL = {
+  order_placed:   { text: 'Order placed',    color: '#b91c1c' },
+  order_restored: { text: 'Stock restored',  color: '#15803d' },
+  manual_restock: { text: 'Manual restock',  color: '#1d4ed8' },
+};
+
+function StockLog() {
+  const [movements, setMovements] = useState(null);
+
+  useEffect(() => {
+    api.get('/products/stock-movements', { params: { limit: 30 } })
+       .then(r => setMovements(r.data))
+       .catch(() => setMovements([]));
+  }, []);
+
+  if (!movements) return <p style={{ color: '#aaa', fontSize: '0.85rem' }}>Loading…</p>;
+  if (movements.length === 0) return <p style={{ color: '#aaa', fontSize: '0.85rem' }}>No stock changes recorded yet.</p>;
+
+  return (
+    <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 12, overflow: 'hidden' }}>
+      <div style={{
+        display: 'grid', gridTemplateColumns: '1fr 70px 90px 90px',
+        gap: '0.5rem', padding: '0.5rem 1rem',
+        background: '#fafaf7', borderBottom: '1px solid #e8e8e3',
+      }}>
+        {['Product', 'Change', 'Type', 'When'].map(h => (
+          <p key={h} style={{ fontSize: '0.72rem', fontWeight: 700, color: '#999', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: h === 'Product' ? 'left' : 'right' }}>
+            {h}
+          </p>
+        ))}
+      </div>
+      {movements.map((m, i) => {
+        const meta = MOVEMENT_TYPE_LABEL[m.type] || { text: m.type, color: '#888' };
+        return (
+          <div key={m.id} style={{
+            display: 'grid', gridTemplateColumns: '1fr 70px 90px 90px',
+            gap: '0.5rem', padding: '0.6rem 1rem',
+            borderBottom: i < movements.length - 1 ? '1px solid #f0f0eb' : 'none',
+            alignItems: 'center',
+          }}>
+            <p style={{ fontSize: '0.88rem', fontWeight: 600, color: '#1a1a1a' }}>{m.product_name}</p>
+            <p style={{
+              fontSize: '0.88rem', fontWeight: 700, textAlign: 'right',
+              color: m.delta_kg > 0 ? '#15803d' : '#b91c1c',
+            }}>
+              {m.delta_kg > 0 ? '+' : ''}{m.delta_kg.toFixed(1)}kg
+            </p>
+            <p style={{ fontSize: '0.75rem', textAlign: 'right', color: meta.color, fontWeight: 600 }}>
+              {meta.text}
+            </p>
+            <p style={{ fontSize: '0.72rem', textAlign: 'right', color: '#bbb' }}>
+              {new Date(m.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ProductAnalytics() {
   const [data, setData] = useState(null);
   const [days, setDays] = useState(30);
@@ -180,8 +240,8 @@ export default function Products() {
       </div>
 
       {/* Tab switcher */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-        {[['inventory', 'Inventory'], ['analytics', 'Sales Analytics']].map(([val, label]) => (
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+        {[['inventory', 'Inventory'], ['analytics', 'Sales Analytics'], ['stocklog', 'Stock Log']].map(([val, label]) => (
           <button key={val} onClick={() => setTab(val)} style={{
             padding: '0.4rem 0.85rem', borderRadius: 20,
             background: tab === val ? '#1a1a1a' : '#f0f0eb',
@@ -194,6 +254,7 @@ export default function Products() {
       </div>
 
       {tab === 'analytics' && <ProductAnalytics />}
+      {tab === 'stocklog'  && <StockLog />}
 
       {tab === 'inventory' && showAdd && (
         <form onSubmit={addProduct} style={{ background: '#fff', borderRadius: 12, padding: '1rem', marginBottom: '1rem', border: '1.5px solid #e8e8e3' }}>

@@ -98,20 +98,41 @@ async function webhookHandler(req, res) {
   res.json({ received: true });
 }
 
-// GET /api/payments/webhook-events — last 20 Stripe webhook events (admin only)
-router.get('/webhook-events', requireAuth, async (_req, res) => {
+// GET /api/payments/webhook-events?payment_intent=<pi_id> — Stripe webhook events (admin only)
+// Without payment_intent: returns the last 20 global events.
+// With payment_intent:    returns all events for a specific PaymentIntent, ordered oldest-first
+//                         so the per-order timeline is readable chronologically.
+router.get('/webhook-events', requireAuth, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT
-         id,
-         event_id,
-         event_type,
-         payload->'data'->'object'->>'id' AS object_id,
-         created_at
-       FROM webhook_events
-       ORDER BY created_at DESC
-       LIMIT 20`
-    );
+    const { payment_intent } = req.query;
+    let result;
+    if (payment_intent) {
+      result = await pool.query(
+        `SELECT
+           id,
+           event_id,
+           event_type,
+           payload->'data'->'object'->>'id' AS object_id,
+           created_at
+         FROM webhook_events
+         WHERE payload->'data'->'object'->>'id' = $1
+            OR payload->>'id' = $1
+         ORDER BY created_at ASC`,
+        [payment_intent]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT
+           id,
+           event_id,
+           event_type,
+           payload->'data'->'object'->>'id' AS object_id,
+           created_at
+         FROM webhook_events
+         ORDER BY created_at DESC
+         LIMIT 20`
+      );
+    }
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });

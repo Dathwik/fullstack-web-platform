@@ -74,6 +74,9 @@ export default function OrderDetail() {
   const [noteSubmitting, setNoteSubmitting] = useState(false);
   const [noteError, setNoteError] = useState('');
 
+  // Stripe payment event history (only for stripe orders)
+  const [stripeEvents, setStripeEvents] = useState([]);
+
   async function fetchOrder() {
     try {
       const res = await api.get(`/orders/${id}`);
@@ -102,6 +105,14 @@ export default function OrderDetail() {
     }
   }
   useEffect(() => { fetchNotes(); }, [id]);
+
+  useEffect(() => {
+    if (order && order.payment_method === 'stripe' && order.stripe_payment_intent) {
+      api.get('/payments/webhook-events', { params: { payment_intent: order.stripe_payment_intent } })
+        .then(r => setStripeEvents(r.data))
+        .catch(() => setStripeEvents([]));
+    }
+  }, [order?.stripe_payment_intent]);
 
   async function addNote(e) {
     e.preventDefault();
@@ -465,7 +476,9 @@ export default function OrderDetail() {
           <div style={{ ...sectionStyle, padding: '0.75rem 1rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <p style={{ fontSize: '0.8rem', color: '#999' }}>Payment (COD)</p>
+                <p style={{ fontSize: '0.8rem', color: '#999' }}>
+                  Payment ({order.payment_method === 'stripe' ? 'Online card' : 'COD'})
+                </p>
                 <p style={{
                   fontSize: '0.85rem', fontWeight: 600,
                   color: order.payment_received ? '#15803d' : '#b45309',
@@ -473,6 +486,11 @@ export default function OrderDetail() {
                 }}>
                   {order.payment_received ? 'Received' : 'Pending'}
                 </p>
+                {order.stripe_payment_intent && (
+                  <p style={{ fontSize: '0.72rem', color: '#bbb', fontFamily: 'monospace', marginTop: '0.2rem' }}>
+                    {order.stripe_payment_intent.slice(0, 22)}…
+                  </p>
+                )}
               </div>
               <button
                 onClick={togglePayment}
@@ -489,6 +507,42 @@ export default function OrderDetail() {
               </button>
             </div>
           </div>
+
+          {/* Stripe payment event history (only for online-paid orders) */}
+          {order.payment_method === 'stripe' && stripeEvents.length > 0 && (
+            <div style={sectionStyle}>
+              <p style={{ fontWeight: 600, fontSize: '0.85rem', color: '#555', marginBottom: '0.5rem' }}>
+                Stripe payment events
+              </p>
+              {stripeEvents.map((ev, i) => (
+                <div key={ev.id} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                  padding: '0.4rem 0',
+                  borderBottom: i < stripeEvents.length - 1 ? '1px solid #f0f0eb' : 'none',
+                }}>
+                  <div>
+                    <p style={{
+                      fontSize: '0.82rem', fontWeight: 600,
+                      color: ev.event_type === 'payment_intent.succeeded' ? '#15803d' : '#555',
+                    }}>
+                      {ev.event_type}
+                    </p>
+                    {ev.object_id && (
+                      <p style={{ fontSize: '0.72rem', color: '#bbb', fontFamily: 'monospace' }}>
+                        {ev.object_id.slice(0, 24)}
+                      </p>
+                    )}
+                  </div>
+                  <p style={{ fontSize: '0.72rem', color: '#bbb', whiteSpace: 'nowrap', marginLeft: '0.5rem' }}>
+                    {new Date(ev.created_at).toLocaleString('en-US', {
+                      month: 'short', day: 'numeric',
+                      hour: 'numeric', minute: '2-digit', hour12: true,
+                    })}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Meta */}
           <div style={{ ...sectionStyle, padding: '0.75rem 1rem' }}>

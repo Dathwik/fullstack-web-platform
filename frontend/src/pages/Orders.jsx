@@ -100,6 +100,7 @@ export default function Orders({ onLogout }) {
   const [topCustomers, setTopCustomers] = useState(null);
   const [showTopCustomers, setShowTopCustomers] = useState(false);
   const [webhookEvents, setWebhookEvents] = useState([]);
+  const [fulfillmentStats, setFulfillmentStats] = useState(null);
   const navigate = useNavigate();
 
   const sessionStartRef = useRef(new Date().toISOString());
@@ -142,6 +143,7 @@ export default function Orders({ onLogout }) {
     api.get('/products/low-stock').then(r => setLowStock(r.data)).catch(() => {});
     api.get('/orders/analytics').then(r => setAnalytics(r.data)).catch(() => {});
     api.get('/payments/webhook-events').then(r => setWebhookEvents(r.data)).catch(() => {});
+    api.get('/orders/fulfillment-stats').then(r => setFulfillmentStats(r.data)).catch(() => {});
   }, []);
 
   async function advanceStatus(e, order) {
@@ -314,6 +316,30 @@ export default function Orders({ onLogout }) {
               <p style={{ fontSize: '1.15rem', fontWeight: 700, color: '#1a1a1a' }}>{value}</p>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Fulfillment time card */}
+      {fulfillmentStats && fulfillmentStats.count_completed > 0 && (
+        <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 10, padding: '0.75rem 1rem', marginBottom: '1rem' }}>
+          <p style={{ fontSize: '0.72rem', color: '#999', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>
+            Fulfillment time — last {fulfillmentStats.days} days ({fulfillmentStats.count_completed} orders)
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.5rem' }}>
+            {[
+              { label: 'Avg',    value: fulfillmentStats.avg_hours },
+              { label: 'Median', value: fulfillmentStats.median_hours },
+              { label: 'Fastest', value: fulfillmentStats.min_hours },
+              { label: 'Slowest', value: fulfillmentStats.max_hours },
+            ].map(({ label, value }) => (
+              <div key={label} style={{ textAlign: 'center' }}>
+                <p style={{ fontSize: '1rem', fontWeight: 700, color: '#1a1a1a' }}>
+                  {value !== null ? `${value}h` : '—'}
+                </p>
+                <p style={{ fontSize: '0.7rem', color: '#aaa', marginTop: '0.1rem' }}>{label}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

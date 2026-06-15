@@ -19,6 +19,37 @@ router.get('/low-stock', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/products/stock-movements?limit=20 — recent inventory changes (auth required)
+router.get('/stock-movements', requireAuth, async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const result = await pool.query(
+      `SELECT
+         sm.id,
+         p.name  AS product_name,
+         sm.delta_kg,
+         sm.type,
+         sm.order_id,
+         sm.created_at
+       FROM stock_movements sm
+       JOIN products p ON p.id = sm.product_id
+       ORDER BY sm.created_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+    res.json(result.rows.map(r => ({
+      id:           r.id,
+      product_name: r.product_name,
+      delta_kg:     parseFloat(r.delta_kg),
+      type:         r.type,
+      order_id:     r.order_id,
+      created_at:   r.created_at,
+    })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/products/analytics?days=30 — sales breakdown per product (auth required)
 router.get('/analytics', requireAuth, async (req, res) => {
   try {
@@ -84,6 +115,15 @@ router.post('/', requireAuth, async (req, res) => {
 router.patch('/:id', requireAuth, async (req, res) => {
   try {
     const { name, price_per_kg, is_available, stock_kg } = req.body;
+
+    // Fetch current stock before update so we can compute the delta for manual restocks
+    let oldStockKg = undefined;
+    if (stock_kg !== undefined) {
+      const cur = await pool.query('SELECT stock_kg FROM products WHERE id=$1', [req.params.id]);
+      if (!cur.rows.length) return res.status(404).json({ error: 'Product not found' });
+      oldStockKg = cur.rows[0].stock_kg;
+    }
+
     const fields = [], params = [];
     let i = 1;
     if (name !== undefined)         { fields.push(`name=$${i++}`);         params.push(name); }
@@ -99,6 +139,18 @@ router.patch('/:id', requireAuth, async (req, res) => {
     );
     if (!result.rows.length)
       return res.status(404).json({ error: 'Product not found' });
+
+    // Record stock movement when admin manually sets stock_kg and both values are numeric
+    if (stock_kg !== undefined && stock_kg !== null && oldStockKg !== null && oldStockKg !== undefined) {
+      const delta = parseFloat(stock_kg) - parseFloat(oldStockKg);
+      if (delta !== 0) {
+        await pool.query(
+          `INSERT INTO stock_movements (product_id, delta_kg, type) VALUES ($1, $2, 'manual_restock')`,
+          [req.params.id, delta]
+        );
+      }
+    }
+
     res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });

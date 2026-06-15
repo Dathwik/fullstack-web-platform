@@ -36,8 +36,9 @@ CREATE TABLE orders (
   customer_id UUID REFERENCES customers(id) ON DELETE SET NULL,
   payment_method VARCHAR(10) NOT NULL DEFAULT 'cod' CHECK (payment_method IN ('cod', 'stripe')),
   stripe_payment_intent VARCHAR(100),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  created_at  TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TIMESTAMP   DEFAULT CURRENT_TIMESTAMP,
+  completed_at TIMESTAMPTZ NULL
 );
 
 CREATE INDEX orders_customer_id_idx ON orders(customer_id);
@@ -76,6 +77,18 @@ CREATE TABLE webhook_events (
 );
 
 CREATE INDEX webhook_events_created_at_idx ON webhook_events(created_at DESC);
+
+CREATE TABLE stock_movements (
+  id          UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id  UUID         NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  delta_kg    DECIMAL(8,2) NOT NULL,
+  type        VARCHAR(30)  NOT NULL CHECK (type IN ('order_placed', 'order_restored', 'manual_restock')),
+  order_id    UUID         REFERENCES orders(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ  DEFAULT NOW()
+);
+
+CREATE INDEX stock_movements_product_id_idx ON stock_movements(product_id);
+CREATE INDEX stock_movements_created_at_idx ON stock_movements(created_at DESC);
 
 INSERT INTO products (name, price_per_kg) VALUES
   ('Spicy Mixture', 12.50),

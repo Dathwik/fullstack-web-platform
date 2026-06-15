@@ -241,6 +241,39 @@ router.get('/top-customers', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/orders/fulfillment-stats?days=30 — average time from Received to Completed
+router.get('/fulfillment-stats', requireAuth, async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days, 10) || 30, 365);
+    const result = await pool.query(
+      `SELECT
+         COUNT(*)                                                                       AS count_completed,
+         ROUND(EXTRACT(EPOCH FROM AVG(completed_at - created_at))   / 3600, 1)         AS avg_hours,
+         ROUND(EXTRACT(EPOCH FROM MIN(completed_at - created_at))   / 3600, 1)         AS min_hours,
+         ROUND(EXTRACT(EPOCH FROM MAX(completed_at - created_at))   / 3600, 1)         AS max_hours,
+         ROUND(EXTRACT(EPOCH FROM PERCENTILE_CONT(0.5) WITHIN GROUP (
+           ORDER BY (completed_at - created_at)
+         )) / 3600, 1)                                                                 AS median_hours
+       FROM orders
+       WHERE status = 'Completed'
+         AND completed_at IS NOT NULL
+         AND created_at >= CURRENT_DATE - ($1 || ' days')::interval`,
+      [days]
+    );
+    const row = result.rows[0];
+    res.json({
+      count_completed: parseInt(row.count_completed, 10),
+      avg_hours:       row.avg_hours    !== null ? parseFloat(row.avg_hours)    : null,
+      min_hours:       row.min_hours    !== null ? parseFloat(row.min_hours)    : null,
+      max_hours:       row.max_hours    !== null ? parseFloat(row.max_hours)    : null,
+      median_hours:    row.median_hours !== null ? parseFloat(row.median_hours) : null,
+      days,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/orders/analytics — last 7 days of order counts and revenue by day
 router.get('/analytics', requireAuth, async (_req, res) => {
   try {
@@ -482,7 +515,7 @@ router.get('/:id', requireAuth, async (req, res) => {
   }
 });
 
-// Shared helper: validate items, check stock, insert order_items, deduct stock
+// Shared helper: validate items, check stock, insert order_items, deduct stock, log movement
 async function insertItemsWithStockCheck(client, orderId, items) {
   for (const item of items) {
     if (!item.product_id || !item.quantity_kg || item.quantity_kg < 1)
@@ -509,6 +542,11 @@ async function insertItemsWithStockCheck(client, orderId, items) {
       await client.query(
         'UPDATE products SET stock_kg = stock_kg - $1 WHERE id=$2',
         [item.quantity_kg, item.product_id]
+      );
+      await client.query(
+        `INSERT INTO stock_movements (product_id, delta_kg, type, order_id)
+         VALUES ($1, $2, 'order_placed', $3)`,
+        [item.product_id, -parseFloat(item.quantity_kg), orderId]
       );
     }
   }
@@ -596,30 +634,63 @@ router.post('/', requireAuth, async (req, res) => {
 
 // PATCH /api/orders/:id/status — move order through lifecycle (transitions enforced)
 router.patch('/:id/status', requireAuth, async (req, res) => {
+  const client = await pool.connect();
   try {
     const { status } = req.body;
-    const current = await pool.query('SELECT status FROM orders WHERE id=$1', [req.params.id]);
-    if (!current.rows.length)
+    const current = await client.query('SELECT status FROM orders WHERE id=$1', [req.params.id]);
+    if (!current.rows.length) {
+      client.release();
       return res.status(404).json({ error: 'Order not found' });
+    }
 
     const currentStatus = current.rows[0].status;
     const allowed = VALID_TRANSITIONS[currentStatus] || [];
-    if (!allowed.includes(status))
+    if (!allowed.includes(status)) {
+      client.release();
       return res.status(400).json({
         error: `Cannot transition from "${currentStatus}" to "${status}". Allowed: ${allowed.join(', ') || 'none'}`,
       });
+    }
 
-    const result = await pool.query(
-      `UPDATE orders SET status=$1::order_status, updated_at=NOW() WHERE id=$2 RETURNING *`,
+    await client.query('BEGIN');
+
+    // Set completed_at when an order reaches Completed state
+    const completedClause = status === 'Completed' ? ', completed_at = NOW()' : '';
+    const result = await client.query(
+      `UPDATE orders SET status=$1::order_status, updated_at=NOW()${completedClause} WHERE id=$2 RETURNING *`,
       [status, req.params.id]
     );
+
+    // Restore stock when cancelling an order (items are not deleted, just the status changes)
+    if (status === 'Cancelled') {
+      const items = await client.query(
+        'SELECT product_id, quantity_kg FROM order_items WHERE order_id=$1',
+        [req.params.id]
+      );
+      for (const item of items.rows) {
+        await client.query(
+          'UPDATE products SET stock_kg = stock_kg + $1 WHERE id=$2 AND stock_kg IS NOT NULL',
+          [item.quantity_kg, item.product_id]
+        );
+        await client.query(
+          `INSERT INTO stock_movements (product_id, delta_kg, type, order_id)
+           VALUES ($1, $2, 'order_restored', $3)`,
+          [item.product_id, parseFloat(item.quantity_kg), req.params.id]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
     const updatedOrder = result.rows[0];
     res.json(updatedOrder);
 
     // Fire-and-forget: send status notification email if the customer provided one.
     sendOrderStatusEmail(updatedOrder, status);
   } catch (err) {
+    await client.query('ROLLBACK');
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -672,6 +743,12 @@ router.patch('/:id', requireAuth, async (req, res) => {
         'UPDATE products SET stock_kg = stock_kg + $1 WHERE id=$2 AND stock_kg IS NOT NULL',
         [old.quantity_kg, old.product_id]
       );
+      await client.query(
+        `INSERT INTO stock_movements (product_id, delta_kg, type, order_id)
+         SELECT $1, $2, 'order_restored', $3
+         WHERE EXISTS (SELECT 1 FROM products WHERE id=$1 AND stock_kg IS NOT NULL)`,
+        [old.product_id, parseFloat(old.quantity_kg), req.params.id]
+      );
     }
 
     await client.query('DELETE FROM order_items WHERE order_id=$1', [req.params.id]);
@@ -717,6 +794,12 @@ router.delete('/:id', requireAuth, async (req, res) => {
       await client.query(
         'UPDATE products SET stock_kg = stock_kg + $1 WHERE id=$2 AND stock_kg IS NOT NULL',
         [item.quantity_kg, item.product_id]
+      );
+      await client.query(
+        `INSERT INTO stock_movements (product_id, delta_kg, type, order_id)
+         SELECT $1, $2, 'order_restored', $3
+         WHERE EXISTS (SELECT 1 FROM products WHERE id=$1 AND stock_kg IS NOT NULL)`,
+        [item.product_id, parseFloat(item.quantity_kg), req.params.id]
       );
     }
 
