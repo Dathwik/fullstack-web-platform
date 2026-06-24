@@ -169,6 +169,8 @@ export default function Products() {
   const [saving, setSaving] = useState(false);
   const [editingStockId, setEditingStockId] = useState(null);
   const [stockDraft, setStockDraft] = useState('');
+  const [editingReorderId, setEditingReorderId] = useState(null);
+  const [reorderDraft, setReorderDraft] = useState('');
 
   async function fetchProducts() {
     const res = await api.get('/products');
@@ -218,11 +220,25 @@ export default function Products() {
     fetchProducts();
   }
 
+  function startReorderEdit(product) {
+    setEditingReorderId(product.id);
+    setReorderDraft(product.reorder_point_kg !== null ? String(product.reorder_point_kg) : '');
+  }
+
+  async function saveReorder(product) {
+    const value = reorderDraft.trim();
+    const reorder_point_kg = value === '' ? null : parseFloat(value);
+    await api.patch(`/products/${product.id}`, { reorder_point_kg });
+    setEditingReorderId(null);
+    fetchProducts();
+  }
+
   function stockLabel(product) {
     if (product.stock_kg === null) return { text: 'Unlimited', color: '#aaa' };
     const kg = parseFloat(product.stock_kg);
+    const threshold = product.reorder_point_kg !== null ? parseFloat(product.reorder_point_kg) : 5;
     if (kg === 0) return { text: 'Out of stock', color: '#b91c1c' };
-    if (kg < 5)  return { text: `${kg}kg — Low`, color: '#b45309' };
+    if (kg < threshold) return { text: `${kg}kg — Low`, color: '#b45309' };
     return { text: `${kg}kg`, color: '#15803d' };
   }
 
@@ -309,7 +325,7 @@ export default function Products() {
 
             {/* Stock row */}
             <div style={{ marginTop: '0.6rem', paddingTop: '0.6rem', borderTop: '1px solid #f0f0eb', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <p style={{ fontSize: '0.75rem', color: '#999', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', minWidth: 40 }}>Stock</p>
+              <p style={{ fontSize: '0.75rem', color: '#999', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', minWidth: 56 }}>Stock</p>
               {isEditingStock ? (
                 <>
                   <input
@@ -337,6 +353,41 @@ export default function Products() {
                 </button>
               )}
             </div>
+
+            {/* Reorder point row (only when stock tracking is on) */}
+            {product.stock_kg !== null && (
+              <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <p style={{ fontSize: '0.75rem', color: '#999', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', minWidth: 56 }}>Reorder</p>
+                {editingReorderId === product.id ? (
+                  <>
+                    <input
+                      type="number" min="0" step="0.5" autoFocus
+                      value={reorderDraft}
+                      onChange={e => setReorderDraft(e.target.value)}
+                      placeholder="kg (blank = use default)"
+                      style={{ flex: 1, padding: '0.35rem 0.6rem', border: '1.5px solid #fcd34d', borderRadius: 7, fontSize: '0.85rem' }}
+                      onKeyDown={e => { if (e.key === 'Enter') saveReorder(product); if (e.key === 'Escape') setEditingReorderId(null); }}
+                    />
+                    <button onClick={() => saveReorder(product)}
+                      style={{ padding: '0.35rem 0.65rem', borderRadius: 7, background: '#1a1a1a', color: '#fff', fontSize: '0.8rem', fontWeight: 600 }}>
+                      Save
+                    </button>
+                    <button onClick={() => setEditingReorderId(null)}
+                      style={{ padding: '0.35rem 0.5rem', borderRadius: 7, background: '#f0f0eb', color: '#555', fontSize: '0.8rem' }}>
+                      ×
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => startReorderEdit(product)}
+                    style={{ background: 'none', padding: 0, textAlign: 'left', cursor: 'pointer' }}>
+                    <span style={{ fontSize: '0.82rem', color: product.reorder_point_kg !== null ? '#b45309' : '#ccc' }}>
+                      {product.reorder_point_kg !== null ? `alert at ${parseFloat(product.reorder_point_kg)}kg` : 'not set'}
+                    </span>
+                    <span style={{ fontSize: '0.75rem', color: '#bbb', marginLeft: '0.4rem' }}>edit</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         );
       })}

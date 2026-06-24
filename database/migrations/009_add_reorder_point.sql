@@ -1,0 +1,1 @@
+ALTER TABLE products ADD COLUMN IF NOT EXISTS reorder_point_kg DECIMAL(8,2) NULL;

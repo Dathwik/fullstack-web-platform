@@ -101,6 +101,7 @@ export default function Orders({ onLogout }) {
   const [showTopCustomers, setShowTopCustomers] = useState(false);
   const [webhookEvents, setWebhookEvents] = useState([]);
   const [fulfillmentStats, setFulfillmentStats] = useState(null);
+  const [fulfillmentDays, setFulfillmentDays] = useState(30);
   const navigate = useNavigate();
 
   const sessionStartRef = useRef(new Date().toISOString());
@@ -143,8 +144,14 @@ export default function Orders({ onLogout }) {
     api.get('/products/low-stock').then(r => setLowStock(r.data)).catch(() => {});
     api.get('/orders/analytics').then(r => setAnalytics(r.data)).catch(() => {});
     api.get('/payments/webhook-events').then(r => setWebhookEvents(r.data)).catch(() => {});
-    api.get('/orders/fulfillment-stats').then(r => setFulfillmentStats(r.data)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setFulfillmentStats(null);
+    api.get('/orders/fulfillment-stats', { params: { days: fulfillmentDays } })
+      .then(r => setFulfillmentStats(r.data))
+      .catch(() => {});
+  }, [fulfillmentDays]);
 
   async function advanceStatus(e, order) {
     e.stopPropagation();
@@ -320,15 +327,35 @@ export default function Orders({ onLogout }) {
       )}
 
       {/* Fulfillment time card */}
-      {fulfillmentStats && fulfillmentStats.count_completed > 0 && (
-        <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 10, padding: '0.75rem 1rem', marginBottom: '1rem' }}>
-          <p style={{ fontSize: '0.72rem', color: '#999', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>
-            Fulfillment time — last {fulfillmentStats.days} days ({fulfillmentStats.count_completed} orders)
+      <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 10, padding: '0.75rem 1rem', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+          <p style={{ fontSize: '0.72rem', color: '#999', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Fulfillment time
+            {fulfillmentStats && fulfillmentStats.count_completed > 0 && (
+              <span style={{ fontWeight: 400, textTransform: 'none' }}> — {fulfillmentStats.count_completed} orders</span>
+            )}
           </p>
+          <div style={{ display: 'flex', gap: '0.25rem' }}>
+            {[7, 30, 90].map(d => (
+              <button key={d} onClick={() => setFulfillmentDays(d)} style={{
+                padding: '0.2rem 0.5rem', borderRadius: 6, fontSize: '0.72rem', fontWeight: 500,
+                background: fulfillmentDays === d ? '#1a1a1a' : '#f0f0eb',
+                color:      fulfillmentDays === d ? '#fff'    : '#888',
+              }}>
+                {d}d
+              </button>
+            ))}
+          </div>
+        </div>
+        {!fulfillmentStats ? (
+          <p style={{ fontSize: '0.82rem', color: '#ccc', textAlign: 'center', padding: '0.25rem 0' }}>Loading…</p>
+        ) : fulfillmentStats.count_completed === 0 ? (
+          <p style={{ fontSize: '0.82rem', color: '#ccc', textAlign: 'center', padding: '0.25rem 0' }}>No completed orders in this period</p>
+        ) : (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.5rem' }}>
             {[
-              { label: 'Avg',    value: fulfillmentStats.avg_hours },
-              { label: 'Median', value: fulfillmentStats.median_hours },
+              { label: 'Avg',     value: fulfillmentStats.avg_hours },
+              { label: 'Median',  value: fulfillmentStats.median_hours },
               { label: 'Fastest', value: fulfillmentStats.min_hours },
               { label: 'Slowest', value: fulfillmentStats.max_hours },
             ].map(({ label, value }) => (
@@ -340,8 +367,8 @@ export default function Orders({ onLogout }) {
               </div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* 7-day revenue chart */}
       <RevenueChart data={analytics} />
@@ -430,6 +457,12 @@ export default function Orders({ onLogout }) {
             style={{ padding: '0.5rem 0.85rem', borderRadius: 8, background: '#f0f0eb', fontSize: '0.85rem', fontWeight: 500 }}
           >
             Products
+          </button>
+          <button
+            onClick={() => navigate('/reviews')}
+            style={{ padding: '0.5rem 0.85rem', borderRadius: 8, background: '#f0f0eb', fontSize: '0.85rem', fontWeight: 500 }}
+          >
+            Reviews
           </button>
           <button
             onClick={() => selectMode ? exitSelectMode() : setSelectMode(true)}

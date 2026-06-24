@@ -3,13 +3,15 @@ const router = express.Router();
 const pool = require('../db');
 const requireAuth = require('../middleware/auth');
 
-// GET /api/products/low-stock?threshold=5 — products below the stock threshold (auth required)
+// GET /api/products/low-stock?threshold=5 — products below their reorder point (auth required)
+// Uses each product's own reorder_point_kg when set; falls back to the global threshold default.
 router.get('/low-stock', requireAuth, async (req, res) => {
   try {
     const threshold = parseFloat(req.query.threshold) || 5;
     const result = await pool.query(
       `SELECT * FROM products
-       WHERE stock_kg IS NOT NULL AND stock_kg < $1
+       WHERE stock_kg IS NOT NULL
+         AND stock_kg < COALESCE(reorder_point_kg, $1)
        ORDER BY stock_kg ASC`,
       [threshold]
     );
@@ -114,7 +116,7 @@ router.post('/', requireAuth, async (req, res) => {
 // PATCH /api/products/:id — edit name, price, availability, or stock
 router.patch('/:id', requireAuth, async (req, res) => {
   try {
-    const { name, price_per_kg, is_available, stock_kg } = req.body;
+    const { name, price_per_kg, is_available, stock_kg, reorder_point_kg } = req.body;
 
     // Fetch current stock before update so we can compute the delta for manual restocks
     let oldStockKg = undefined;
@@ -126,10 +128,11 @@ router.patch('/:id', requireAuth, async (req, res) => {
 
     const fields = [], params = [];
     let i = 1;
-    if (name !== undefined)         { fields.push(`name=$${i++}`);         params.push(name); }
-    if (price_per_kg !== undefined) { fields.push(`price_per_kg=$${i++}`); params.push(price_per_kg); }
-    if (is_available !== undefined) { fields.push(`is_available=$${i++}`); params.push(is_available); }
-    if (stock_kg !== undefined)     { fields.push(`stock_kg=$${i++}`);     params.push(stock_kg); }
+    if (name !== undefined)             { fields.push(`name=$${i++}`);              params.push(name); }
+    if (price_per_kg !== undefined)     { fields.push(`price_per_kg=$${i++}`);      params.push(price_per_kg); }
+    if (is_available !== undefined)     { fields.push(`is_available=$${i++}`);      params.push(is_available); }
+    if (stock_kg !== undefined)         { fields.push(`stock_kg=$${i++}`);          params.push(stock_kg); }
+    if (reorder_point_kg !== undefined) { fields.push(`reorder_point_kg=$${i++}`); params.push(reorder_point_kg); }
     if (!fields.length)
       return res.status(400).json({ error: 'Nothing to update' });
     params.push(req.params.id);

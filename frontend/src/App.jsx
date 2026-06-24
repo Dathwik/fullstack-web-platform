@@ -5,6 +5,7 @@ import Orders from './pages/Orders';
 import NewOrder from './pages/NewOrder';
 import Products from './pages/Products';
 import OrderDetail from './pages/OrderDetail';
+import AdminReviews from './pages/AdminReviews';
 import PlaceOrder from './pages/PlaceOrder';
 import OrderConfirmation from './pages/OrderConfirmation';
 import TrackOrder from './pages/TrackOrder';
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="/"           element={<Orders onLogout={handleLogout} />} />
             <Route path="/new-order"  element={<NewOrder />} />
             <Route path="/products"   element={<Products />} />
+            <Route path="/reviews"    element={<AdminReviews />} />
             <Route path="/orders/:id" element={<OrderDetail />} />
             <Route path="*"           element={<Navigate to="/" />} />
           </>
