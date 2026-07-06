@@ -171,6 +171,7 @@ export default function Products() {
   const [stockDraft, setStockDraft] = useState('');
   const [editingReorderId, setEditingReorderId] = useState(null);
   const [reorderDraft, setReorderDraft] = useState('');
+  const [forecast, setForecast] = useState({});
 
   async function fetchProducts() {
     const res = await api.get('/products');
@@ -178,6 +179,12 @@ export default function Products() {
   }
 
   useEffect(() => { fetchProducts(); }, []);
+
+  useEffect(() => {
+    api.get('/products/stock-forecast').then(r => {
+      setForecast(Object.fromEntries(r.data.map(f => [f.id, f])));
+    }).catch(() => {});
+  }, []);
 
   async function toggleAvailable(product) {
     await api.patch(`/products/${product.id}`, { is_available: !product.is_available });
@@ -349,6 +356,11 @@ export default function Products() {
                 <button onClick={() => startStockEdit(product)}
                   style={{ background: 'none', padding: 0, textAlign: 'left', cursor: 'pointer' }}>
                   <span style={{ fontSize: '0.85rem', fontWeight: 600, color: stock.color }}>{stock.text}</span>
+                  {forecast[product.id]?.days_remaining != null && (
+                    <span style={{ fontSize: '0.72rem', color: '#aaa', marginLeft: '0.4rem' }}>
+                      · ~{forecast[product.id].days_remaining}d left at current pace
+                    </span>
+                  )}
                   <span style={{ fontSize: '0.75rem', color: '#bbb', marginLeft: '0.4rem' }}>edit</span>
                 </button>
               )}

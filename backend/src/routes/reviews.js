@@ -45,32 +45,47 @@ router.get('/order/:order_id', async (req, res) => {
   }
 });
 
-// GET /api/reviews/stats — rating distribution and average (admin only)
+// GET /api/reviews/stats?days=30 — rating distribution and average (admin only)
 // Registered before / to avoid route shadowing concerns with future nested routes.
-router.get('/stats', requireAuth, async (_req, res) => {
+// Without `days`, stats cover all reviews ever submitted. With `days`, stats are scoped
+// to the trailing window and a `prev_avg_rating` for the equally-sized prior window is
+// included so the admin can see whether the average is trending up or down.
+router.get('/stats', requireAuth, async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT
-         ROUND(AVG(rating)::numeric, 1) AS avg_rating,
-         COUNT(*)                        AS total_count,
-         rating,
-         COUNT(*)                        AS star_count
-       FROM reviews
-       GROUP BY rating
-       ORDER BY rating DESC`
-    );
-    const rows = result.rows;
-    const totalCount = rows.reduce((s, r) => s + parseInt(r.star_count, 10), 0);
-    const avgRating  = rows.length > 0 ? parseFloat(rows[0].avg_rating) : null;
+    const days = req.query.days ? Math.min(parseInt(req.query.days, 10), 365) : null;
+    const whereCurrent = days ? `WHERE created_at >= NOW() - ($1 || ' days')::interval` : '';
+    const params = days ? [days] : [];
 
-    // Re-query for a single avg_rating across all rows (GROUP BY skews the per-row value)
-    const avgRes = await pool.query(`SELECT ROUND(AVG(rating)::numeric, 1) AS avg FROM reviews`);
-    const avg = avgRes.rows[0].avg !== null ? parseFloat(avgRes.rows[0].avg) : null;
+    const distRes = await pool.query(
+      `SELECT rating, COUNT(*) AS star_count FROM reviews ${whereCurrent} GROUP BY rating`,
+      params
+    );
+    const avgRes = await pool.query(
+      `SELECT ROUND(AVG(rating)::numeric, 1) AS avg FROM reviews ${whereCurrent}`,
+      params
+    );
 
     const distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-    for (const r of rows) distribution[parseInt(r.rating, 10)] = parseInt(r.star_count, 10);
+    let totalCount = 0;
+    for (const r of distRes.rows) {
+      const count = parseInt(r.star_count, 10);
+      distribution[parseInt(r.rating, 10)] = count;
+      totalCount += count;
+    }
+    const avg = avgRes.rows[0].avg !== null ? parseFloat(avgRes.rows[0].avg) : null;
 
-    res.json({ avg_rating: avg, total_count: totalCount, distribution });
+    let prevAvgRating = null;
+    if (days) {
+      const prevRes = await pool.query(
+        `SELECT ROUND(AVG(rating)::numeric, 1) AS avg FROM reviews
+         WHERE created_at >= NOW() - ($1 || ' days')::interval
+           AND created_at <  NOW() - ($2 || ' days')::interval`,
+        [days * 2, days]
+      );
+      prevAvgRating = prevRes.rows[0].avg !== null ? parseFloat(prevRes.rows[0].avg) : null;
+    }
+
+    res.json({ avg_rating: avg, total_count: totalCount, distribution, days, prev_avg_rating: prevAvgRating });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

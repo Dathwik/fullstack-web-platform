@@ -87,6 +87,42 @@ router.get('/analytics', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/products/stock-forecast?days=30 — projected days of stock remaining (auth required)
+// avg_daily_usage_kg is derived from order_items over the trailing window (cancelled orders
+// excluded); days_remaining = stock_kg / avg_daily_usage_kg, null when there's no usage to
+// project from. Complements reorder_point_kg's fixed-threshold alert with a velocity-aware one.
+router.get('/stock-forecast', requireAuth, async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days, 10) || 30, 365);
+    const result = await pool.query(
+      `SELECT
+         p.id,
+         p.stock_kg,
+         COALESCE(SUM(oi.quantity_kg), 0) / $1::numeric AS avg_daily_usage_kg
+       FROM products p
+       LEFT JOIN order_items oi ON oi.product_id = p.id
+       LEFT JOIN orders o
+         ON o.id = oi.order_id
+        AND o.status <> 'Cancelled'
+        AND o.created_at >= CURRENT_DATE - ($1 || ' days')::interval
+       WHERE p.stock_kg IS NOT NULL
+       GROUP BY p.id, p.stock_kg`,
+      [days]
+    );
+    res.json(result.rows.map(r => {
+      const avgDailyUsageKg = parseFloat(r.avg_daily_usage_kg);
+      const stockKg = parseFloat(r.stock_kg);
+      return {
+        id: r.id,
+        avg_daily_usage_kg: avgDailyUsageKg,
+        days_remaining: avgDailyUsageKg > 0 ? Math.round(stockKg / avgDailyUsageKg) : null,
+      };
+    }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/products — public, used to populate order forms
 router.get('/', async (req, res) => {
   try {
