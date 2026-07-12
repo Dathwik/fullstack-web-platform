@@ -91,14 +91,24 @@ router.get('/stats', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/reviews — list all reviews (admin only)
-router.get('/', requireAuth, async (_req, res) => {
+// GET /api/reviews?rating=5 — list reviews, optionally scoped to one star rating (admin only)
+// Filtering server-side (rather than fetching all reviews and filtering in the browser) keeps
+// the payload small as the reviews table grows past what's reasonable to ship on every load.
+router.get('/', requireAuth, async (req, res) => {
   try {
+    const rating = req.query.rating !== undefined ? parseInt(req.query.rating, 10) : null;
+    if (rating !== null && (rating < 1 || rating > 5))
+      return res.status(400).json({ error: 'rating must be between 1 and 5' });
+
+    const where = rating !== null ? 'WHERE r.rating = $1' : '';
+    const params = rating !== null ? [rating] : [];
     const result = await pool.query(
       `SELECT r.*, o.customer_name, o.phone
        FROM reviews r
        JOIN orders o ON o.id = r.order_id
-       ORDER BY r.created_at DESC`
+       ${where}
+       ORDER BY r.created_at DESC`,
+      params
     );
     res.json(result.rows);
   } catch (err) {

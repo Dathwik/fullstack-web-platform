@@ -304,7 +304,7 @@ export default function Orders({ onLogout }) {
             Low stock — {lowStock.length} product{lowStock.length > 1 ? 's' : ''} need restocking
           </p>
           <p style={{ fontSize: '0.78rem', color: '#b45309' }}>
-            {lowStock.map(p => `${p.name} (${parseFloat(p.stock_kg)}kg)`).join(' · ')}
+            {lowStock.map(p => `${p.name} (${parseFloat(p.stock_kg)}kg${p.days_remaining != null ? `, ~${p.days_remaining}d left` : ''})`).join(' · ')}
           </p>
         </div>
       )}

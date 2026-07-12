@@ -43,8 +43,10 @@ export default function AdminReviews() {
   const [starFilter, setStarFilter] = useState(null); // null = all ratings
 
   useEffect(() => {
-    api.get('/reviews').then(r => setReviews(r.data)).catch(() => setReviews([]));
-  }, []);
+    api.get('/reviews', { params: starFilter ? { rating: starFilter } : {} })
+      .then(r => setReviews(r.data))
+      .catch(() => setReviews([]));
+  }, [starFilter]);
 
   useEffect(() => {
     api.get('/reviews/stats', { params: statsDays ? { days: statsDays } : {} })
@@ -57,13 +59,10 @@ export default function AdminReviews() {
     setStatsDays(d);
   }
 
-  function toggleStarFilter(star) {
-    setStarFilter(prev => prev === star ? null : star);
+  function selectStarFilter(star) {
+    setReviews(null);
+    setStarFilter(star);
   }
-
-  const filteredReviews = reviews === null ? null
-    : starFilter === null ? reviews
-    : reviews.filter(r => r.rating === starFilter);
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: '1rem 1rem 4rem' }}>
@@ -120,7 +119,7 @@ export default function AdminReviews() {
                   <StarBar
                     key={s} star={s} count={stats.distribution[s] || 0} total={stats.total_count}
                     active={starFilter === s}
-                    onClick={() => toggleStarFilter(s)}
+                    onClick={() => selectStarFilter(starFilter === s ? null : s)}
                   />
                 ))}
               </div>
@@ -135,37 +134,35 @@ export default function AdminReviews() {
       </div>
 
       {/* Star filter row */}
-      {reviews && reviews.length > 0 && (
-        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-          {[['all', 'All'], [5, '5★'], [4, '4★'], [3, '3★'], [2, '2★'], [1, '1★']].map(([val, label]) => {
-            const isAll = val === 'all';
-            const active = isAll ? starFilter === null : starFilter === val;
-            return (
-              <button
-                key={label}
-                onClick={() => setStarFilter(isAll ? null : val)}
-                style={{
-                  padding: '0.35rem 0.75rem', borderRadius: 20,
-                  background: active ? '#1a1a1a' : '#f0f0eb',
-                  color: active ? '#fff' : '#555',
-                  fontSize: '0.82rem', fontWeight: 500,
-                }}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+        {[['all', 'All'], [5, '5★'], [4, '4★'], [3, '3★'], [2, '2★'], [1, '1★']].map(([val, label]) => {
+          const isAll = val === 'all';
+          const active = isAll ? starFilter === null : starFilter === val;
+          return (
+            <button
+              key={label}
+              onClick={() => selectStarFilter(isAll ? null : val)}
+              style={{
+                padding: '0.35rem 0.75rem', borderRadius: 20,
+                background: active ? '#1a1a1a' : '#f0f0eb',
+                color: active ? '#fff' : '#555',
+                fontSize: '0.82rem', fontWeight: 500,
+              }}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
 
       {/* Reviews list */}
-      {filteredReviews === null ? (
+      {reviews === null ? (
         <p style={{ color: '#aaa', textAlign: 'center', marginTop: '2rem' }}>Loading…</p>
-      ) : filteredReviews.length === 0 ? (
+      ) : reviews.length === 0 ? (
         <p style={{ color: '#aaa', textAlign: 'center', marginTop: '2rem' }}>
           {starFilter === null ? 'No reviews yet.' : `No ${starFilter}-star reviews.`}
         </p>
-      ) : filteredReviews.map(r => (
+      ) : reviews.map(r => (
         <div
           key={r.id}
           style={{
