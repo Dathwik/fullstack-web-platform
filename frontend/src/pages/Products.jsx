@@ -14,6 +14,21 @@ const MOVEMENT_TYPE_LABEL = {
   manual_restock: { text: 'Manual restock',  color: '#1d4ed8' },
 };
 
+// Compares this window's EMA sales velocity to the prior equal-length window. Faster selling
+// means stock depletes sooner, so it's flagged amber (more urgent) rather than green — the
+// opposite convention from the reviews trend badge, where "up" is good.
+function VelocityTrend({ avg, prevAvg }) {
+  if (avg == null || prevAvg == null || prevAvg === 0) return null;
+  const pctChange = Math.round(((avg - prevAvg) / prevAvg) * 100);
+  if (pctChange === 0) return null;
+  const faster = pctChange > 0;
+  return (
+    <span style={{ fontSize: '0.7rem', color: faster ? '#b45309' : '#15803d', marginLeft: '0.3rem' }}>
+      {faster ? '▲' : '▼'} {Math.abs(pctChange)}%
+    </span>
+  );
+}
+
 function StockLog() {
   const [movements, setMovements] = useState(null);
 
@@ -359,6 +374,10 @@ export default function Products() {
                   {forecast[product.id]?.days_remaining != null && (
                     <span style={{ fontSize: '0.72rem', color: '#aaa', marginLeft: '0.4rem' }}>
                       · ~{forecast[product.id].days_remaining}d left at current pace
+                      <VelocityTrend
+                        avg={forecast[product.id].avg_daily_usage_kg}
+                        prevAvg={forecast[product.id].prev_avg_daily_usage_kg}
+                      />
                     </span>
                   )}
                   <span style={{ fontSize: '0.75rem', color: '#bbb', marginLeft: '0.4rem' }}>edit</span>

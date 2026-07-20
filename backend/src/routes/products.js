@@ -2,42 +2,48 @@ const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 const requireAuth = require('../middleware/auth');
+const { fetchDailyUsage, ema } = require('../services/stockVelocity');
+
+// How many trailing days of history feed the low-stock alert's urgency ranking. Fixed (not a
+// query param) since this is only used for sort order on a banner, not displayed as a figure.
+const LOW_STOCK_VELOCITY_DAYS = 30;
 
 // GET /api/products/low-stock?threshold=5 — products below their reorder point (auth required)
 // Uses each product's own reorder_point_kg when set; falls back to the global threshold default.
-// Ordered by projected days-remaining (stock_kg / trailing-30-day average daily usage) rather
-// than raw kg, so a fast-moving product at 4kg surfaces above a slow-moving one at 2kg when it
-// will actually run out sooner. Products with no recent sales (no usage to project from) sort
-// after any product that does have a projection, ordered by raw kg among themselves.
+// Ordered by projected days-remaining (stock_kg / EMA of trailing daily usage — the same
+// fetchDailyUsage/ema helpers stock-forecast uses) rather than raw kg, so a fast-moving product
+// at 4kg surfaces above a slow-moving one at 2kg when it will actually run out sooner. Products
+// with no recent sales (no usage to project from) sort after any product that does have a
+// projection, ordered by raw kg among themselves.
 router.get('/low-stock', requireAuth, async (req, res) => {
   try {
     const threshold = parseFloat(req.query.threshold) || 5;
-    const result = await pool.query(
-      `SELECT p.*, u.avg_daily_usage_kg
-       FROM products p
-       LEFT JOIN (
-         SELECT oi.product_id, SUM(oi.quantity_kg) / 30.0 AS avg_daily_usage_kg
-         FROM order_items oi
-         JOIN orders o ON o.id = oi.order_id
-         WHERE o.status <> 'Cancelled'
-           AND o.created_at >= CURRENT_DATE - INTERVAL '30 days'
-         GROUP BY oi.product_id
-       ) u ON u.product_id = p.id
-       WHERE p.stock_kg IS NOT NULL
-         AND p.stock_kg < COALESCE(p.reorder_point_kg, $1)
-       ORDER BY
-         CASE WHEN u.avg_daily_usage_kg > 0 THEN p.stock_kg / u.avg_daily_usage_kg END ASC NULLS LAST,
-         p.stock_kg ASC`,
+    const productsRes = await pool.query(
+      `SELECT * FROM products
+       WHERE stock_kg IS NOT NULL
+         AND stock_kg < COALESCE(reorder_point_kg, $1)`,
       [threshold]
     );
-    res.json(result.rows.map(r => {
-      const avgDailyUsageKg = r.avg_daily_usage_kg !== null ? parseFloat(r.avg_daily_usage_kg) : 0;
-      const stockKg = parseFloat(r.stock_kg);
+    if (!productsRes.rows.length) return res.json([]);
+
+    const byProduct = await fetchDailyUsage(LOW_STOCK_VELOCITY_DAYS);
+    const withForecast = productsRes.rows.map(p => {
+      const entry = byProduct.get(p.id);
+      const avgDailyUsageKg = entry ? ema(entry.quantities, LOW_STOCK_VELOCITY_DAYS) : 0;
+      const stockKg = parseFloat(p.stock_kg);
       return {
-        ...r,
+        ...p,
         days_remaining: avgDailyUsageKg > 0 ? Math.round(stockKg / avgDailyUsageKg) : null,
       };
-    }));
+    });
+
+    withForecast.sort((a, b) => {
+      if (a.days_remaining === null) return b.days_remaining === null ? parseFloat(a.stock_kg) - parseFloat(b.stock_kg) : 1;
+      if (b.days_remaining === null) return -1;
+      return a.days_remaining - b.days_remaining;
+    });
+
+    res.json(withForecast);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -109,55 +115,34 @@ router.get('/analytics', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/products/stock-forecast?days=30 — projected days of stock remaining (auth required)
-// avg_daily_usage_kg is an exponential moving average (EMA) over the trailing window's daily
-// totals, not a flat mean — alpha = 2 / (days + 1), the standard N-day EMA smoothing constant,
+// GET /api/products/stock-forecast?days=30&smoothing=14 — projected days of stock remaining
+// (auth required). avg_daily_usage_kg is an exponential moving average (EMA), not a flat mean,
 // so a recent shift in demand is reflected faster than an equally-weighted average would allow.
+// `days` sets how much trailing history is fetched; `smoothing` independently sets how reactive
+// the EMA is (alpha = 2 / (smoothing + 1)) and defaults to `days` when omitted — separating the
+// two lets an administrator look back over a long window while still weighting recent days more
+// heavily than a smoothing value equal to the window would. prev_avg_daily_usage_kg is the same
+// EMA computed over the immediately preceding `days`-length window, for a trend comparison.
 // days_remaining = stock_kg / avg_daily_usage_kg, null when there's no usage to project from.
 // Complements reorder_point_kg's fixed-threshold alert with a velocity-aware one.
 router.get('/stock-forecast', requireAuth, async (req, res) => {
   try {
-    const days = Math.min(parseInt(req.query.days, 10) || 30, 365);
+    const days = Math.min(parseInt(req.query.days, 10) || 30, 180);
+    const smoothing = req.query.smoothing
+      ? Math.min(Math.max(parseInt(req.query.smoothing, 10), 1), days)
+      : days;
 
-    const dailyRes = await pool.query(
-      `WITH days AS (
-         SELECT generate_series(CURRENT_DATE - ($1::int - 1), CURRENT_DATE, interval '1 day')::date AS day
-       ),
-       usage AS (
-         SELECT oi.product_id, o.created_at::date AS day, SUM(oi.quantity_kg) AS qty
-         FROM order_items oi
-         JOIN orders o ON o.id = oi.order_id
-         WHERE o.status <> 'Cancelled'
-           AND o.created_at >= CURRENT_DATE - ($1::int - 1)
-         GROUP BY oi.product_id, o.created_at::date
-       )
-       SELECT p.id AS product_id, p.stock_kg, d.day, COALESCE(u.qty, 0) AS qty
-       FROM products p
-       CROSS JOIN days d
-       LEFT JOIN usage u ON u.product_id = p.id AND u.day = d.day
-       WHERE p.stock_kg IS NOT NULL
-       ORDER BY p.id, d.day`,
-      [days]
-    );
-
-    const byProduct = new Map();
-    for (const row of dailyRes.rows) {
-      if (!byProduct.has(row.product_id)) {
-        byProduct.set(row.product_id, { stockKg: parseFloat(row.stock_kg), quantities: [] });
-      }
-      byProduct.get(row.product_id).quantities.push(parseFloat(row.qty));
-    }
-
-    const alpha = 2 / (days + 1);
+    const byProduct = await fetchDailyUsage(days * 2);
     const forecast = [...byProduct.entries()].map(([productId, { stockKg, quantities }]) => {
-      let ema = quantities[0];
-      for (let i = 1; i < quantities.length; i++) {
-        ema = alpha * quantities[i] + (1 - alpha) * ema;
-      }
+      const prevQuantities = quantities.slice(0, days);
+      const currQuantities = quantities.slice(days);
+      const avgDailyUsageKg = ema(currQuantities, smoothing);
+      const prevAvgDailyUsageKg = ema(prevQuantities, smoothing);
       return {
         id: productId,
-        avg_daily_usage_kg: Math.round(ema * 100) / 100,
-        days_remaining: ema > 0 ? Math.round(stockKg / ema) : null,
+        avg_daily_usage_kg: Math.round(avgDailyUsageKg * 100) / 100,
+        prev_avg_daily_usage_kg: Math.round(prevAvgDailyUsageKg * 100) / 100,
+        days_remaining: avgDailyUsageKg > 0 ? Math.round(stockKg / avgDailyUsageKg) : null,
       };
     });
 
