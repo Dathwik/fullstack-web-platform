@@ -4,20 +4,19 @@ const pool = require('../db');
 const requireAuth = require('../middleware/auth');
 const { fetchDailyUsage, ema } = require('../services/stockVelocity');
 
-// How many trailing days of history feed the low-stock alert's urgency ranking. Fixed (not a
-// query param) since this is only used for sort order on a banner, not displayed as a figure.
-const LOW_STOCK_VELOCITY_DAYS = 30;
-
-// GET /api/products/low-stock?threshold=5 — products below their reorder point (auth required)
-// Uses each product's own reorder_point_kg when set; falls back to the global threshold default.
-// Ordered by projected days-remaining (stock_kg / EMA of trailing daily usage — the same
-// fetchDailyUsage/ema helpers stock-forecast uses) rather than raw kg, so a fast-moving product
-// at 4kg surfaces above a slow-moving one at 2kg when it will actually run out sooner. Products
-// with no recent sales (no usage to project from) sort after any product that does have a
-// projection, ordered by raw kg among themselves.
+// GET /api/products/low-stock?threshold=5&days=30 — products below their reorder point (auth
+// required). Uses each product's own reorder_point_kg when set; falls back to the global
+// threshold default. Ordered by projected days-remaining (stock_kg / EMA of trailing daily
+// usage over the `days` window — the same fetchDailyUsage/ema helpers stock-forecast uses)
+// rather than raw kg, so a fast-moving product at 4kg surfaces above a slow-moving one at 2kg
+// when it will actually run out sooner. Products with no recent sales (no usage to project
+// from) sort after any product that does have a projection, ordered by raw kg among themselves.
+// `days` defaults to 30 (unlike stock-forecast, this has no separate smoothing parameter — it's
+// a banner needing one urgency signal, not a tunable report).
 router.get('/low-stock', requireAuth, async (req, res) => {
   try {
     const threshold = parseFloat(req.query.threshold) || 5;
+    const days = Math.min(parseInt(req.query.days, 10) || 30, 180);
     const productsRes = await pool.query(
       `SELECT * FROM products
        WHERE stock_kg IS NOT NULL
@@ -26,10 +25,10 @@ router.get('/low-stock', requireAuth, async (req, res) => {
     );
     if (!productsRes.rows.length) return res.json([]);
 
-    const byProduct = await fetchDailyUsage(LOW_STOCK_VELOCITY_DAYS);
+    const byProduct = await fetchDailyUsage(days);
     const withForecast = productsRes.rows.map(p => {
       const entry = byProduct.get(p.id);
-      const avgDailyUsageKg = entry ? ema(entry.quantities, LOW_STOCK_VELOCITY_DAYS) : 0;
+      const avgDailyUsageKg = entry ? ema(entry.quantities, days) : 0;
       const stockKg = parseFloat(p.stock_kg);
       return {
         ...p,
@@ -115,33 +114,40 @@ router.get('/analytics', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/products/stock-forecast?days=30&smoothing=14 — projected days of stock remaining
-// (auth required). avg_daily_usage_kg is an exponential moving average (EMA), not a flat mean,
-// so a recent shift in demand is reflected faster than an equally-weighted average would allow.
-// `days` sets how much trailing history is fetched; `smoothing` independently sets how reactive
-// the EMA is (alpha = 2 / (smoothing + 1)) and defaults to `days` when omitted — separating the
-// two lets an administrator look back over a long window while still weighting recent days more
-// heavily than a smoothing value equal to the window would. prev_avg_daily_usage_kg is the same
-// EMA computed over the immediately preceding `days`-length window, for a trend comparison.
+// GET /api/products/stock-forecast?days=30&smoothing=14&compare=true — projected days of stock
+// remaining (auth required). avg_daily_usage_kg is an exponential moving average (EMA), not a
+// flat mean, so a recent shift in demand is reflected faster than an equally-weighted average
+// would allow. `days` sets how much trailing history is fetched; `smoothing` independently sets
+// how reactive the EMA is (alpha = 2 / (smoothing + 1)) and defaults to `days` when omitted —
+// separating the two lets an administrator look back over a long window while still weighting
+// recent days more heavily than a smoothing value equal to the window would.
+// `compare` (default true) controls whether a trend comparison against the immediately
+// preceding `days`-length window is computed; when true, the route fetches `days * 2` of
+// history and `days` is capped at 180 to bound that at a year. Passing `compare=false` skips
+// the previous-window fetch entirely — `prev_avg_daily_usage_kg` is then always null — and
+// raises the `days` cap back to 365, for callers that just want the current rate over a long
+// window and don't need the trend.
 // days_remaining = stock_kg / avg_daily_usage_kg, null when there's no usage to project from.
 // Complements reorder_point_kg's fixed-threshold alert with a velocity-aware one.
 router.get('/stock-forecast', requireAuth, async (req, res) => {
   try {
-    const days = Math.min(parseInt(req.query.days, 10) || 30, 180);
+    const compare = req.query.compare !== 'false';
+    const days = compare
+      ? Math.min(parseInt(req.query.days, 10) || 30, 180)
+      : Math.min(parseInt(req.query.days, 10) || 30, 365);
     const smoothing = req.query.smoothing
       ? Math.min(Math.max(parseInt(req.query.smoothing, 10), 1), days)
       : days;
 
-    const byProduct = await fetchDailyUsage(days * 2);
+    const byProduct = await fetchDailyUsage(compare ? days * 2 : days);
     const forecast = [...byProduct.entries()].map(([productId, { stockKg, quantities }]) => {
-      const prevQuantities = quantities.slice(0, days);
-      const currQuantities = quantities.slice(days);
+      const currQuantities = compare ? quantities.slice(days) : quantities;
       const avgDailyUsageKg = ema(currQuantities, smoothing);
-      const prevAvgDailyUsageKg = ema(prevQuantities, smoothing);
+      const prevAvgDailyUsageKg = compare ? ema(quantities.slice(0, days), smoothing) : null;
       return {
         id: productId,
         avg_daily_usage_kg: Math.round(avgDailyUsageKg * 100) / 100,
-        prev_avg_daily_usage_kg: Math.round(prevAvgDailyUsageKg * 100) / 100,
+        prev_avg_daily_usage_kg: prevAvgDailyUsageKg !== null ? Math.round(prevAvgDailyUsageKg * 100) / 100 : null,
         days_remaining: avgDailyUsageKg > 0 ? Math.round(stockKg / avgDailyUsageKg) : null,
       };
     });

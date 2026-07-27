@@ -16,9 +16,16 @@ const MOVEMENT_TYPE_LABEL = {
 
 // Compares this window's EMA sales velocity to the prior equal-length window. Faster selling
 // means stock depletes sooner, so it's flagged amber (more urgent) rather than green — the
-// opposite convention from the reviews trend badge, where "up" is good.
+// opposite convention from the reviews trend badge, where "up" is good. A prior window with
+// zero sales can't produce a percent change (division by zero), but that's a different signal
+// from "no change" — a product with real sales now and none before is a newly emerging
+// fast-seller, worth flagging even though there's no prior rate to compare against.
 function VelocityTrend({ avg, prevAvg }) {
-  if (avg == null || prevAvg == null || prevAvg === 0) return null;
+  if (avg == null || prevAvg == null) return null;
+  if (prevAvg === 0) {
+    if (avg === 0) return null;
+    return <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#b45309', marginLeft: '0.3rem' }}>▲ New</span>;
+  }
   const pctChange = Math.round(((avg - prevAvg) / prevAvg) * 100);
   if (pctChange === 0) return null;
   const faster = pctChange > 0;
