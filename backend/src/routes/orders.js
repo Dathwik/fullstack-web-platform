@@ -359,8 +359,12 @@ router.get('/', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/orders/:id/invoice — download a PDF invoice for the order (auth required)
-router.get('/:id/invoice', requireAuth, async (req, res) => {
+// GET /api/orders/:id/invoice — download a PDF invoice for the order (admin, or the customer
+// who placed it). requireAuth doesn't apply here since either the admin session or a matching
+// customer session should be accepted, not just the admin one — ownership is checked below
+// against the order's own customer_id once it's been fetched, rather than at the middleware
+// layer where the order isn't known yet.
+router.get('/:id/invoice', async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT o.*,
@@ -382,6 +386,10 @@ router.get('/:id/invoice', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Order not found' });
 
     const order = result.rows[0];
+    const isAdmin = !!req.session?.authenticated;
+    const isOwner = !!req.session?.customer_id && req.session.customer_id === order.customer_id;
+    if (!isAdmin && !isOwner)
+      return res.status(401).json({ error: 'Not authorized' });
     const total = order.items.reduce(
       (s, i) => s + parseFloat(i.quantity_kg) * parseFloat(i.price_per_kg), 0
     );

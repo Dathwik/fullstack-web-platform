@@ -52,4 +52,25 @@ async function sendOrderStatusEmail(order, newStatus) {
   }
 }
 
-module.exports = { sendOrderStatusEmail };
+async function sendEmailChangeVerification(pendingEmail, name, token) {
+  const transport = createTransport();
+  if (!transport) return; // SMTP not configured — silently skip
+
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+  const appUrl = process.env.APP_URL || 'http://localhost:5173';
+  const link = `${appUrl}/verify-email?token=${token}`;
+
+  try {
+    await transport.sendMail({
+      from,
+      to: pendingEmail,
+      subject: 'Confirm your new email address',
+      text: `Hi ${name},\n\nConfirm this email address is yours by opening the link below. It expires in 24 hours.\n\n${link}\n\nIf you didn't request this change, you can ignore this message.`,
+    });
+  } catch (err) {
+    // Email failure must never break the API response; log and continue.
+    console.error('Failed to send email-change verification:', err.message);
+  }
+}
+
+module.exports = { sendOrderStatusEmail, sendEmailChangeVerification };

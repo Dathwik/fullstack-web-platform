@@ -27,6 +27,17 @@ export default function CustomerDashboard() {
   const [nameDraft, setNameDraft] = useState('');
   const [phoneDraft, setPhoneDraft] = useState('');
   const [savingProfile, setSavingProfile] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [currentPasswordDraft, setCurrentPasswordDraft] = useState('');
+  const [newPasswordDraft, setNewPasswordDraft] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [changingEmail, setChangingEmail] = useState(false);
+  const [emailDraft, setEmailDraft] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [emailSuccess, setEmailSuccess] = useState('');
+  const [savingEmail, setSavingEmail] = useState(false);
 
   useEffect(() => {
     api.get('/customers/me').then(r => {
@@ -70,6 +81,44 @@ export default function CustomerDashboard() {
       setEditingProfile(false);
     } finally {
       setSavingProfile(false);
+    }
+  }
+
+  async function savePassword() {
+    setPasswordError('');
+    setPasswordSuccess('');
+    if (newPasswordDraft.length < 8) {
+      setPasswordError('New password must be at least 8 characters');
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      await api.patch('/customers/me/password', {
+        current_password: currentPasswordDraft,
+        new_password: newPasswordDraft,
+      });
+      setPasswordSuccess('Password updated.');
+      setCurrentPasswordDraft('');
+      setNewPasswordDraft('');
+    } catch (err) {
+      setPasswordError(err.response?.data?.error || 'Failed to update password');
+    } finally {
+      setSavingPassword(false);
+    }
+  }
+
+  async function requestEmailChange() {
+    setEmailError('');
+    setEmailSuccess('');
+    setSavingEmail(true);
+    try {
+      const res = await api.post('/customers/me/email', { new_email: emailDraft });
+      setEmailSuccess(`Check ${res.data.pending_email} for a confirmation link to finish the change.`);
+      setEmailDraft('');
+    } catch (err) {
+      setEmailError(err.response?.data?.error || 'Failed to request email change');
+    } finally {
+      setSavingEmail(false);
     }
   }
 
@@ -119,9 +168,17 @@ export default function CustomerDashboard() {
               <h1 style={{ fontSize: '1.4rem', fontWeight: 700 }}>Hi, {customer.name}</h1>
               <p style={{ fontSize: '0.85rem', color: '#888', marginTop: '0.15rem' }}>{customer.email}</p>
               {customer.phone && <p style={{ fontSize: '0.8rem', color: '#aaa', marginTop: '0.1rem' }}>{customer.phone}</p>}
-              <button onClick={startEditProfile} style={{ fontSize: '0.75rem', color: '#1d4ed8', background: 'none', marginTop: '0.3rem', padding: 0 }}>
-                Edit profile
-              </button>
+              <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.3rem' }}>
+                <button onClick={startEditProfile} style={{ fontSize: '0.75rem', color: '#1d4ed8', background: 'none', padding: 0 }}>
+                  Edit profile
+                </button>
+                <button onClick={() => setChangingPassword(s => !s)} style={{ fontSize: '0.75rem', color: '#1d4ed8', background: 'none', padding: 0 }}>
+                  Change password
+                </button>
+                <button onClick={() => setChangingEmail(s => !s)} style={{ fontSize: '0.75rem', color: '#1d4ed8', background: 'none', padding: 0 }}>
+                  Change email
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -136,6 +193,65 @@ export default function CustomerDashboard() {
           + New order
         </button>
       </div>
+
+      {/* Change password */}
+      {changingPassword && (
+        <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 10, padding: '0.85rem 1rem', marginBottom: '1rem' }}>
+          <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#555', marginBottom: '0.5rem' }}>Change password</p>
+          <input
+            type="password" value={currentPasswordDraft}
+            onChange={e => setCurrentPasswordDraft(e.target.value)}
+            placeholder="Current password"
+            style={{ display: 'block', width: '100%', padding: '0.4rem 0.6rem', border: '1.5px solid #ddd', borderRadius: 8, fontSize: '0.85rem', marginBottom: '0.4rem', boxSizing: 'border-box' }}
+          />
+          <input
+            type="password" value={newPasswordDraft}
+            onChange={e => setNewPasswordDraft(e.target.value)}
+            placeholder="New password (min 8 characters)"
+            style={{ display: 'block', width: '100%', padding: '0.4rem 0.6rem', border: '1.5px solid #ddd', borderRadius: 8, fontSize: '0.85rem', marginBottom: '0.4rem', boxSizing: 'border-box' }}
+          />
+          {passwordError && <p style={{ color: '#b91c1c', fontSize: '0.78rem', marginBottom: '0.4rem' }}>{passwordError}</p>}
+          {passwordSuccess && <p style={{ color: '#15803d', fontSize: '0.78rem', marginBottom: '0.4rem' }}>{passwordSuccess}</p>}
+          <div style={{ display: 'flex', gap: '0.4rem' }}>
+            <button onClick={savePassword} disabled={savingPassword}
+              style={{ padding: '0.35rem 0.7rem', borderRadius: 7, background: '#1a1a1a', color: '#fff', fontSize: '0.78rem', fontWeight: 600, opacity: savingPassword ? 0.6 : 1 }}>
+              {savingPassword ? 'Saving…' : 'Update password'}
+            </button>
+            <button onClick={() => { setChangingPassword(false); setPasswordError(''); setPasswordSuccess(''); }}
+              style={{ padding: '0.35rem 0.7rem', borderRadius: 7, background: '#f0f0eb', color: '#555', fontSize: '0.78rem' }}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Change email */}
+      {changingEmail && (
+        <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 10, padding: '0.85rem 1rem', marginBottom: '1rem' }}>
+          <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#555', marginBottom: '0.5rem' }}>Change email</p>
+          <p style={{ fontSize: '0.75rem', color: '#aaa', marginBottom: '0.5rem' }}>
+            We'll email a confirmation link to the new address before it takes effect.
+          </p>
+          <input
+            type="email" value={emailDraft}
+            onChange={e => setEmailDraft(e.target.value)}
+            placeholder="New email address"
+            style={{ display: 'block', width: '100%', padding: '0.4rem 0.6rem', border: '1.5px solid #ddd', borderRadius: 8, fontSize: '0.85rem', marginBottom: '0.4rem', boxSizing: 'border-box' }}
+          />
+          {emailError && <p style={{ color: '#b91c1c', fontSize: '0.78rem', marginBottom: '0.4rem' }}>{emailError}</p>}
+          {emailSuccess && <p style={{ color: '#15803d', fontSize: '0.78rem', marginBottom: '0.4rem' }}>{emailSuccess}</p>}
+          <div style={{ display: 'flex', gap: '0.4rem' }}>
+            <button onClick={requestEmailChange} disabled={savingEmail || !emailDraft}
+              style={{ padding: '0.35rem 0.7rem', borderRadius: 7, background: '#1a1a1a', color: '#fff', fontSize: '0.78rem', fontWeight: 600, opacity: savingEmail || !emailDraft ? 0.6 : 1 }}>
+              {savingEmail ? 'Sending…' : 'Send confirmation link'}
+            </button>
+            <button onClick={() => { setChangingEmail(false); setEmailError(''); setEmailSuccess(''); }}
+              style={{ padding: '0.35rem 0.7rem', borderRadius: 7, background: '#f0f0eb', color: '#555', fontSize: '0.78rem' }}>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Account stats */}
       {stats && stats.total_orders > 0 && (
@@ -216,6 +332,18 @@ export default function CustomerDashboard() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <p style={{ fontSize: '0.95rem', fontWeight: 700 }}>${total.toFixed(2)}</p>
                 <div style={{ display: 'flex', gap: '0.4rem' }}>
+                  <a
+                    href={`/api/orders/${order.id}/invoice`}
+                    download
+                    style={{
+                      padding: '0.4rem 0.75rem', borderRadius: 8,
+                      background: '#f0f0eb', color: '#555',
+                      fontSize: '0.8rem', fontWeight: 500,
+                      textDecoration: 'none', display: 'inline-block',
+                    }}
+                  >
+                    Invoice
+                  </a>
                   <button
                     onClick={() => navigate(`/track-order?id=${order.id}`)}
                     style={{

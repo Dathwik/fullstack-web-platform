@@ -1,11 +1,14 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const pool = require('../db');
 const requireCustomer = require('../middleware/customerAuth');
 const loginLimiter = require('../middleware/rateLimiter');
+const { sendEmailChangeVerification } = require('../services/mailer');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
 
 // POST /api/customers/register — public, creates account and signs the customer in
 router.post('/register', loginLimiter, async (req, res) => {
@@ -112,6 +115,105 @@ router.patch('/me', requireCustomer, async (req, res) => {
     );
     res.json(result.rows[0]);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/customers/me/password — change the signed-in customer's password
+// Requires the current password (not just an active session) since a session cookie alone can
+// be left behind on a shared device — re-proving the password before a security-sensitive change
+// is the same reasoning the admin login and Stripe webhook signing already apply elsewhere.
+router.patch('/me/password', requireCustomer, loginLimiter, async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body;
+    if (!current_password || !new_password)
+      return res.status(400).json({ error: 'current_password and new_password required' });
+    if (new_password.length < 8)
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const result = await pool.query(
+      'SELECT password_hash FROM customers WHERE id=$1',
+      [req.session.customer_id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Account not found' });
+
+    const valid = await bcrypt.compare(current_password, result.rows[0].password_hash);
+    if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
+
+    const password_hash = await bcrypt.hash(new_password, 10);
+    await pool.query('UPDATE customers SET password_hash=$1 WHERE id=$2', [password_hash, req.session.customer_id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/customers/me/email — request an email change (auth required)
+// The address on the account is left untouched until the new one is confirmed via the emailed
+// link — writing it immediately would let someone lock the real owner out just by mistyping (or
+// deliberately entering) an email they don't control.
+router.post('/me/email', requireCustomer, loginLimiter, async (req, res) => {
+  try {
+    const { new_email } = req.body;
+    if (!new_email || !EMAIL_RE.test(new_email))
+      return res.status(400).json({ error: 'Invalid email address' });
+
+    const normalized = new_email.toLowerCase();
+    const existing = await pool.query(
+      'SELECT id FROM customers WHERE email=$1 AND id <> $2',
+      [normalized, req.session.customer_id]
+    );
+    if (existing.rows.length)
+      return res.status(409).json({ error: 'An account with that email already exists' });
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + EMAIL_VERIFY_TTL_MS);
+    const result = await pool.query(
+      `UPDATE customers
+       SET pending_email=$1, email_verify_token=$2, email_verify_expires=$3
+       WHERE id=$4
+       RETURNING name`,
+      [normalized, token, expires, req.session.customer_id]
+    );
+
+    await sendEmailChangeVerification(normalized, result.rows[0].name, token);
+    res.json({ pending_email: normalized });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/customers/verify-email?token=... — confirm a pending email change (public)
+// Public (not requireCustomer) because the link is opened from an email client, which may not
+// carry the session cookie that initiated the change — the token itself is the proof of intent.
+router.get('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.query;
+    if (!token) return res.status(400).json({ error: 'token required' });
+
+    const result = await pool.query(
+      `SELECT id, pending_email, email_verify_expires FROM customers
+       WHERE email_verify_token=$1`,
+      [token]
+    );
+    if (!result.rows.length)
+      return res.status(400).json({ error: 'Invalid or already-used verification link' });
+
+    const row = result.rows[0];
+    if (!row.pending_email || new Date(row.email_verify_expires) < new Date())
+      return res.status(400).json({ error: 'This verification link has expired' });
+
+    const updated = await pool.query(
+      `UPDATE customers
+       SET email=$1, pending_email=NULL, email_verify_token=NULL, email_verify_expires=NULL
+       WHERE id=$2
+       RETURNING id, email, name, phone`,
+      [row.pending_email, row.id]
+    );
+    res.json(updated.rows[0]);
+  } catch (err) {
+    if (err.code === '23505')
+      return res.status(409).json({ error: 'That email was claimed by another account in the meantime' });
     res.status(500).json({ error: err.message });
   }
 });

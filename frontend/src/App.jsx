@@ -12,6 +12,7 @@ import TrackOrder from './pages/TrackOrder';
 import CustomerLogin from './pages/CustomerLogin';
 import CustomerRegister from './pages/CustomerRegister';
 import CustomerDashboard from './pages/CustomerDashboard';
+import VerifyEmail from './pages/VerifyEmail';
 import api from './api';
 
 export default function App() {
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="/sign-in"            element={<CustomerLogin />} />
         <Route path="/register"           element={<CustomerRegister />} />
         <Route path="/account"            element={<CustomerDashboard />} />
+        <Route path="/verify-email"       element={<VerifyEmail />} />
 
         {/* Protected routes */}
         {!authed ? (
