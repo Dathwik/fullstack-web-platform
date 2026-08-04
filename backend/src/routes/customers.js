@@ -85,6 +85,65 @@ router.get('/me', async (req, res) => {
   }
 });
 
+// PATCH /api/customers/me — update the signed-in customer's name and/or phone
+// Email is intentionally not editable here since it's the login identifier and is unique-
+// constrained; changing it would need its own re-verification flow, out of scope for this route.
+router.patch('/me', requireCustomer, async (req, res) => {
+  try {
+    const { name, phone } = req.body;
+    const fields = [], params = [];
+    let i = 1;
+    if (name !== undefined) {
+      if (!name.trim()) return res.status(400).json({ error: 'name cannot be empty' });
+      fields.push(`name=$${i++}`);
+      params.push(name.trim());
+    }
+    if (phone !== undefined) {
+      fields.push(`phone=$${i++}`);
+      params.push(phone || null);
+    }
+    if (!fields.length)
+      return res.status(400).json({ error: 'Nothing to update' });
+
+    params.push(req.session.customer_id);
+    const result = await pool.query(
+      `UPDATE customers SET ${fields.join(', ')} WHERE id=$${i} RETURNING id, email, name, phone`,
+      params
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/customers/stats — lifetime order count, total spend, and account age (auth required)
+// Cancelled orders are excluded from both total_orders and total_spent, since neither figure
+// should reflect an order that was never actually fulfilled or paid for.
+router.get('/stats', requireCustomer, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+         (SELECT created_at FROM customers WHERE id = $1) AS member_since,
+         COUNT(DISTINCT o.id) AS total_orders,
+         COALESCE(SUM(oi.quantity_kg * p.price_per_kg), 0) AS total_spent
+       FROM orders o
+       LEFT JOIN order_items oi ON oi.order_id = o.id
+       LEFT JOIN products p ON p.id = oi.product_id
+       WHERE o.customer_id = $1
+         AND o.status <> 'Cancelled'`,
+      [req.session.customer_id]
+    );
+    const row = result.rows[0];
+    res.json({
+      member_since: row.member_since,
+      total_orders: parseInt(row.total_orders, 10),
+      total_spent: parseFloat(row.total_spent),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/customers/orders — past orders for the signed-in customer
 router.get('/orders', requireCustomer, async (req, res) => {
   try {

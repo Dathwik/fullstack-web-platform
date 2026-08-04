@@ -9,11 +9,24 @@ const STATUS_COLORS = {
   'Cancelled':      { bg: '#fef2f2', color: '#b91c1c', border: '#fca5a5' },
 };
 
+const ORDER_FILTERS = [
+  ['all', 'All'],
+  ['active', 'Active'],
+  ['completed', 'Completed'],
+  ['cancelled', 'Cancelled'],
+];
+
 export default function CustomerDashboard() {
   const navigate = useNavigate();
   const [customer, setCustomer] = useState(null);
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState(null);
+  const [filter, setFilter] = useState('all');
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [phoneDraft, setPhoneDraft] = useState('');
+  const [savingProfile, setSavingProfile] = useState(false);
 
   useEffect(() => {
     api.get('/customers/me').then(r => {
@@ -22,7 +35,10 @@ export default function CustomerDashboard() {
         return;
       }
       setCustomer(r.data);
-      return api.get('/customers/orders').then(o => setOrders(o.data));
+      return Promise.all([
+        api.get('/customers/orders').then(o => setOrders(o.data)),
+        api.get('/customers/stats').then(s => setStats(s.data)),
+      ]);
     }).catch(() => navigate('/sign-in')).finally(() => setLoading(false));
   }, [navigate]);
 
@@ -39,17 +55,75 @@ export default function CustomerDashboard() {
     navigate('/place-order', { state: { reorderItems } });
   }
 
+  function startEditProfile() {
+    setNameDraft(customer.name);
+    setPhoneDraft(customer.phone || '');
+    setEditingProfile(true);
+  }
+
+  async function saveProfile() {
+    if (!nameDraft.trim()) return;
+    setSavingProfile(true);
+    try {
+      const res = await api.patch('/customers/me', { name: nameDraft.trim(), phone: phoneDraft.trim() || null });
+      setCustomer(res.data);
+      setEditingProfile(false);
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
   if (loading) return <p style={{ textAlign: 'center', padding: '4rem', color: '#888' }}>Loading...</p>;
   if (!customer) return null;
+
+  const filteredOrders = orders.filter(o => {
+    if (filter === 'active')    return o.status === 'Received' || o.status === 'In Preparation';
+    if (filter === 'completed') return o.status === 'Completed';
+    if (filter === 'cancelled') return o.status === 'Cancelled';
+    return true;
+  });
 
   return (
     <div style={{ maxWidth: 480, margin: '0 auto', padding: '1.5rem 1rem 4rem' }}>
 
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
-        <div>
-          <h1 style={{ fontSize: '1.4rem', fontWeight: 700 }}>Hi, {customer.name}</h1>
-          <p style={{ fontSize: '0.85rem', color: '#888', marginTop: '0.15rem' }}>{customer.email}</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+        <div style={{ flex: 1 }}>
+          {editingProfile ? (
+            <div>
+              <input
+                value={nameDraft} autoFocus
+                onChange={e => setNameDraft(e.target.value)}
+                placeholder="Name"
+                style={{ display: 'block', width: '100%', padding: '0.4rem 0.6rem', border: '1.5px solid #93c5fd', borderRadius: 8, fontSize: '1rem', fontWeight: 700, marginBottom: '0.4rem' }}
+              />
+              <input
+                value={phoneDraft}
+                onChange={e => setPhoneDraft(e.target.value)}
+                placeholder="Phone (optional)"
+                style={{ display: 'block', width: '100%', padding: '0.35rem 0.6rem', border: '1.5px solid #93c5fd', borderRadius: 8, fontSize: '0.85rem', marginBottom: '0.4rem' }}
+              />
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <button onClick={saveProfile} disabled={savingProfile}
+                  style={{ padding: '0.3rem 0.65rem', borderRadius: 7, background: '#1a1a1a', color: '#fff', fontSize: '0.78rem', fontWeight: 600, opacity: savingProfile ? 0.6 : 1 }}>
+                  {savingProfile ? 'Saving…' : 'Save'}
+                </button>
+                <button onClick={() => setEditingProfile(false)}
+                  style={{ padding: '0.3rem 0.65rem', borderRadius: 7, background: '#f0f0eb', color: '#555', fontSize: '0.78rem' }}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <h1 style={{ fontSize: '1.4rem', fontWeight: 700 }}>Hi, {customer.name}</h1>
+              <p style={{ fontSize: '0.85rem', color: '#888', marginTop: '0.15rem' }}>{customer.email}</p>
+              {customer.phone && <p style={{ fontSize: '0.8rem', color: '#aaa', marginTop: '0.1rem' }}>{customer.phone}</p>}
+              <button onClick={startEditProfile} style={{ fontSize: '0.75rem', color: '#1d4ed8', background: 'none', marginTop: '0.3rem', padding: 0 }}>
+                Edit profile
+              </button>
+            </>
+          )}
         </div>
         <button
           onClick={() => navigate('/place-order')}
@@ -62,6 +136,35 @@ export default function CustomerDashboard() {
           + New order
         </button>
       </div>
+
+      {/* Account stats */}
+      {stats && stats.total_orders > 0 && (
+        <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 10, padding: '0.65rem 1rem', marginBottom: '1.25rem' }}>
+          <p style={{ fontSize: '0.85rem', color: '#555' }}>
+            <strong>{stats.total_orders}</strong> order{stats.total_orders > 1 ? 's' : ''}
+            {' · '}
+            <strong>${stats.total_spent.toFixed(2)}</strong> spent
+            {' · '}
+            member since {new Date(stats.member_since).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+          </p>
+        </div>
+      )}
+
+      {/* Order status filter */}
+      {orders.length > 0 && (
+        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+          {ORDER_FILTERS.map(([val, label]) => (
+            <button key={val} onClick={() => setFilter(val)} style={{
+              padding: '0.35rem 0.75rem', borderRadius: 20,
+              background: filter === val ? '#1a1a1a' : '#f0f0eb',
+              color: filter === val ? '#fff' : '#555',
+              fontSize: '0.82rem', fontWeight: 500,
+            }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Orders */}
       <p style={{ fontWeight: 600, fontSize: '0.85rem', color: '#555', marginBottom: '0.6rem' }}>Order history</p>
@@ -80,8 +183,12 @@ export default function CustomerDashboard() {
             Place your first order
           </button>
         </div>
+      ) : filteredOrders.length === 0 ? (
+        <p style={{ color: '#aaa', textAlign: 'center', padding: '2rem 0' }}>
+          No {filter === 'all' ? '' : filter} orders here.
+        </p>
       ) : (
-        orders.map(order => {
+        filteredOrders.map(order => {
           const sc = STATUS_COLORS[order.status];
           const total = order.items.reduce(
             (sum, i) => sum + parseFloat(i.quantity_kg) * parseFloat(i.price_per_kg), 0
