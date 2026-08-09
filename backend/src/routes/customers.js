@@ -5,10 +5,11 @@ const bcrypt = require('bcryptjs');
 const pool = require('../db');
 const requireCustomer = require('../middleware/customerAuth');
 const loginLimiter = require('../middleware/rateLimiter');
-const { sendEmailChangeVerification } = require('../services/mailer');
+const { sendEmailChangeVerification, sendPasswordResetEmail } = require('../services/mailer');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const EMAIL_VERIFY_TTL_MS = 24 * 60 * 60 * 1000;
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000;
 
 // POST /api/customers/register — public, creates account and signs the customer in
 router.post('/register', loginLimiter, async (req, res) => {
@@ -68,6 +69,69 @@ router.post('/login', loginLimiter, async (req, res) => {
 router.post('/logout', (req, res) => {
   if (req.session) delete req.session.customer_id;
   res.json({ success: true });
+});
+
+// POST /api/customers/forgot-password — public, request a reset link for a locked-out customer
+// Responds identically whether or not the email is registered, so an attacker (or anyone) can't
+// use this endpoint to enumerate which addresses have accounts — the only observable difference
+// between "sent" and "no such account" would otherwise be the email itself arriving.
+router.post('/forgot-password', loginLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'email required' });
+
+    const result = await pool.query(
+      'SELECT id, name FROM customers WHERE email=$1',
+      [email.toLowerCase()]
+    );
+    if (result.rows.length) {
+      const token = crypto.randomBytes(32).toString('hex');
+      const expires = new Date(Date.now() + PASSWORD_RESET_TTL_MS);
+      await pool.query(
+        'UPDATE customers SET password_reset_token=$1, password_reset_expires=$2 WHERE id=$3',
+        [token, expires, result.rows[0].id]
+      );
+      await sendPasswordResetEmail(email.toLowerCase(), result.rows[0].name, token);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/customers/reset-password — public, consumes a reset token and sets a new password
+// Public rather than requireCustomer for the same reason verify-email is: the whole point is to
+// let in someone who currently *can't* sign in, so requiring a session would defeat the feature.
+router.post('/reset-password', loginLimiter, async (req, res) => {
+  try {
+    const { token, new_password } = req.body;
+    if (!token || !new_password)
+      return res.status(400).json({ error: 'token and new_password required' });
+    if (new_password.length < 8)
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const result = await pool.query(
+      'SELECT id, password_reset_expires FROM customers WHERE password_reset_token=$1',
+      [token]
+    );
+    if (!result.rows.length)
+      return res.status(400).json({ error: 'Invalid or already-used reset link' });
+
+    const row = result.rows[0];
+    if (new Date(row.password_reset_expires) < new Date())
+      return res.status(400).json({ error: 'This reset link has expired' });
+
+    const password_hash = await bcrypt.hash(new_password, 10);
+    await pool.query(
+      `UPDATE customers
+       SET password_hash=$1, password_reset_token=NULL, password_reset_expires=NULL
+       WHERE id=$2`,
+      [password_hash, row.id]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET /api/customers/me — returns the signed-in customer or null
@@ -148,6 +212,34 @@ router.patch('/me/password', requireCustomer, loginLimiter, async (req, res) => 
   }
 });
 
+// DELETE /api/customers/me — permanently delete the signed-in customer's account
+// Requires the current password in the request body for the same re-authentication reasoning as
+// the password-change route above — this is the single most destructive action available to a
+// customer, so an active session alone shouldn't be sufficient to trigger it. Orders placed by
+// this account are not deleted: orders.customer_id is ON DELETE SET NULL, so order history (and
+// the revenue it represents) survives for the admin's records as an unlinked, guest-style order.
+router.delete('/me', requireCustomer, loginLimiter, async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password) return res.status(400).json({ error: 'password required' });
+
+    const result = await pool.query(
+      'SELECT password_hash FROM customers WHERE id=$1',
+      [req.session.customer_id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Account not found' });
+
+    const valid = await bcrypt.compare(password, result.rows[0].password_hash);
+    if (!valid) return res.status(401).json({ error: 'Password is incorrect' });
+
+    await pool.query('DELETE FROM customers WHERE id=$1', [req.session.customer_id]);
+    delete req.session.customer_id;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/customers/me/email — request an email change (auth required)
 // The address on the account is left untouched until the new one is confirmed via the emailed
 // link — writing it immediately would let someone lock the real owner out just by mistyping (or
@@ -159,6 +251,15 @@ router.post('/me/email', requireCustomer, loginLimiter, async (req, res) => {
       return res.status(400).json({ error: 'Invalid email address' });
 
     const normalized = new_email.toLowerCase();
+    const current = await pool.query('SELECT email FROM customers WHERE id=$1', [req.session.customer_id]);
+    if (!current.rows.length) return res.status(404).json({ error: 'Account not found' });
+    if (current.rows[0].email === normalized) {
+      // Requesting a "change" to the address already on the account isn't a collision with
+      // another account, but it's also not a real change — skip issuing a token and sending an
+      // unnecessary email for something that's already true.
+      return res.json({ pending_email: null, already_current: true });
+    }
+
     const existing = await pool.query(
       'SELECT id FROM customers WHERE email=$1 AND id <> $2',
       [normalized, req.session.customer_id]

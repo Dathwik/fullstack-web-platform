@@ -45,6 +45,9 @@ export default function CustomerLogin() {
           style={inputStyle} type="password" placeholder="Password"
           value={password} onChange={e => setPassword(e.target.value)} required
         />
+        <p style={{ textAlign: 'right', marginTop: '-0.4rem', marginBottom: '0.75rem' }}>
+          <Link to="/forgot-password" style={{ fontSize: '0.8rem', color: '#888' }}>Forgot password?</Link>
+        </p>
         {error && <p style={{ color: '#d00', fontSize: '0.85rem', marginBottom: '0.75rem' }}>{error}</p>}
         <button
           type="submit" disabled={submitting}

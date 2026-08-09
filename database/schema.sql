@@ -25,10 +25,13 @@ CREATE TABLE customers (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   pending_email VARCHAR(150),
   email_verify_token VARCHAR(100),
-  email_verify_expires TIMESTAMPTZ
+  email_verify_expires TIMESTAMPTZ,
+  password_reset_token VARCHAR(100),
+  password_reset_expires TIMESTAMPTZ
 );
 
 CREATE INDEX customers_email_verify_token_idx ON customers(email_verify_token);
+CREATE INDEX customers_password_reset_token_idx ON customers(password_reset_token);
 
 CREATE TABLE orders (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

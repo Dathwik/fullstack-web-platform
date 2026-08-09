@@ -13,6 +13,8 @@ import CustomerLogin from './pages/CustomerLogin';
 import CustomerRegister from './pages/CustomerRegister';
 import CustomerDashboard from './pages/CustomerDashboard';
 import VerifyEmail from './pages/VerifyEmail';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import api from './api';
 
 export default function App() {
@@ -42,6 +44,8 @@ export default function App() {
         <Route path="/register"           element={<CustomerRegister />} />
         <Route path="/account"            element={<CustomerDashboard />} />
         <Route path="/verify-email"       element={<VerifyEmail />} />
+        <Route path="/forgot-password"    element={<ForgotPassword />} />
+        <Route path="/reset-password"     element={<ResetPassword />} />
 
         {/* Protected routes */}
         {!authed ? (

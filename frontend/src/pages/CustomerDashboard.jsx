@@ -38,6 +38,10 @@ export default function CustomerDashboard() {
   const [emailError, setEmailError] = useState('');
   const [emailSuccess, setEmailSuccess] = useState('');
   const [savingEmail, setSavingEmail] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deletePasswordDraft, setDeletePasswordDraft] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [deleteInProgress, setDeleteInProgress] = useState(false);
 
   useEffect(() => {
     api.get('/customers/me').then(r => {
@@ -113,12 +117,33 @@ export default function CustomerDashboard() {
     setSavingEmail(true);
     try {
       const res = await api.post('/customers/me/email', { new_email: emailDraft });
-      setEmailSuccess(`Check ${res.data.pending_email} for a confirmation link to finish the change.`);
+      if (res.data.already_current) {
+        setEmailSuccess("That's already your email — nothing to confirm.");
+      } else {
+        setEmailSuccess(`Check ${res.data.pending_email} for a confirmation link to finish the change.`);
+      }
       setEmailDraft('');
     } catch (err) {
       setEmailError(err.response?.data?.error || 'Failed to request email change');
     } finally {
       setSavingEmail(false);
+    }
+  }
+
+  async function deleteAccount() {
+    setDeleteError('');
+    if (!deletePasswordDraft) {
+      setDeleteError('Enter your password to confirm.');
+      return;
+    }
+    setDeleteInProgress(true);
+    try {
+      await api.delete('/customers/me', { data: { password: deletePasswordDraft } });
+      navigate('/sign-in');
+    } catch (err) {
+      setDeleteError(err.response?.data?.error || 'Failed to delete account');
+    } finally {
+      setDeleteInProgress(false);
     }
   }
 
@@ -377,6 +402,44 @@ export default function CustomerDashboard() {
       >
         Sign out
       </button>
+
+      {/* Danger zone */}
+      <div style={{ marginTop: '2.5rem', paddingTop: '1.25rem', borderTop: '1px solid #f0f0eb' }}>
+        {!deletingAccount ? (
+          <button
+            onClick={() => setDeletingAccount(true)}
+            style={{ display: 'block', margin: '0 auto', color: '#b91c1c', background: 'none', fontSize: '0.8rem' }}
+          >
+            Delete account
+          </button>
+        ) : (
+          <div style={{ background: '#fef2f2', border: '1.5px solid #fca5a5', borderRadius: 10, padding: '0.85rem 1rem' }}>
+            <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#b91c1c', marginBottom: '0.4rem' }}>
+              Delete your account?
+            </p>
+            <p style={{ fontSize: '0.75rem', color: '#b91c1c', marginBottom: '0.5rem' }}>
+              This can't be undone. Your order history stays on file for our records but will no longer be linked to an account.
+            </p>
+            <input
+              type="password" value={deletePasswordDraft}
+              onChange={e => setDeletePasswordDraft(e.target.value)}
+              placeholder="Enter your password to confirm"
+              style={{ display: 'block', width: '100%', padding: '0.4rem 0.6rem', border: '1.5px solid #fca5a5', borderRadius: 8, fontSize: '0.85rem', marginBottom: '0.4rem', boxSizing: 'border-box' }}
+            />
+            {deleteError && <p style={{ color: '#b91c1c', fontSize: '0.78rem', marginBottom: '0.4rem' }}>{deleteError}</p>}
+            <div style={{ display: 'flex', gap: '0.4rem' }}>
+              <button onClick={deleteAccount} disabled={deleteInProgress}
+                style={{ padding: '0.35rem 0.7rem', borderRadius: 7, background: '#b91c1c', color: '#fff', fontSize: '0.78rem', fontWeight: 600, opacity: deleteInProgress ? 0.6 : 1 }}>
+                {deleteInProgress ? 'Deleting…' : 'Permanently delete'}
+              </button>
+              <button onClick={() => { setDeletingAccount(false); setDeletePasswordDraft(''); setDeleteError(''); }}
+                style={{ padding: '0.35rem 0.7rem', borderRadius: 7, background: '#f0f0eb', color: '#555', fontSize: '0.78rem' }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

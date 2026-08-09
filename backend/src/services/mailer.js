@@ -73,4 +73,25 @@ async function sendEmailChangeVerification(pendingEmail, name, token) {
   }
 }
 
-module.exports = { sendOrderStatusEmail, sendEmailChangeVerification };
+async function sendPasswordResetEmail(email, name, token) {
+  const transport = createTransport();
+  if (!transport) return; // SMTP not configured — silently skip
+
+  const from = process.env.SMTP_FROM || process.env.SMTP_USER;
+  const appUrl = process.env.APP_URL || 'http://localhost:5173';
+  const link = `${appUrl}/reset-password?token=${token}`;
+
+  try {
+    await transport.sendMail({
+      from,
+      to: email,
+      subject: 'Reset your password',
+      text: `Hi ${name},\n\nWe received a request to reset your password. Open the link below to choose a new one. It expires in 1 hour.\n\n${link}\n\nIf you didn't request this, you can ignore this message — your password won't be changed.`,
+    });
+  } catch (err) {
+    // Email failure must never break the API response; log and continue.
+    console.error('Failed to send password-reset email:', err.message);
+  }
+}
+
+module.exports = { sendOrderStatusEmail, sendEmailChangeVerification, sendPasswordResetEmail };
