@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
-const loginLimiter = require('../middleware/rateLimiter');
+const { loginLimiter } = require('../middleware/rateLimiter');
 
 // POST /api/auth/login
 router.post('/login', loginLimiter, async (req, res) => {

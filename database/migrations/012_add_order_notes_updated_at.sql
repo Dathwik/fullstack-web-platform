@@ -1,0 +1,1 @@
+ALTER TABLE order_notes ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;

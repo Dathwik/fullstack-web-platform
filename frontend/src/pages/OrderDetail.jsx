@@ -73,6 +73,10 @@ export default function OrderDetail() {
   const [noteDraft, setNoteDraft] = useState('');
   const [noteSubmitting, setNoteSubmitting] = useState(false);
   const [noteError, setNoteError] = useState('');
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editNoteDraft, setEditNoteDraft] = useState('');
+  const [editNoteError, setEditNoteError] = useState('');
+  const [editNoteSaving, setEditNoteSaving] = useState(false);
 
   // Stripe payment event history (only for stripe orders)
   const [stripeEvents, setStripeEvents] = useState([]);
@@ -135,6 +139,28 @@ export default function OrderDetail() {
     if (!confirm('Delete this note?')) return;
     await api.delete(`/orders/${id}/notes/${noteId}`);
     await fetchNotes();
+  }
+
+  function startEditNote(note) {
+    setEditingNoteId(note.id);
+    setEditNoteDraft(note.body);
+    setEditNoteError('');
+  }
+
+  async function saveEditNote(noteId) {
+    const body = editNoteDraft.trim();
+    if (!body) return;
+    setEditNoteError('');
+    setEditNoteSaving(true);
+    try {
+      await api.patch(`/orders/${id}/notes/${noteId}`, { body });
+      setEditingNoteId(null);
+      await fetchNotes();
+    } catch (err) {
+      setEditNoteError(err.response?.data?.error || 'Failed to save note');
+    } finally {
+      setEditNoteSaving(false);
+    }
   }
 
   useEffect(() => {
@@ -595,13 +621,61 @@ export default function OrderDetail() {
                     {new Date(n.created_at).toLocaleString('en-US', {
                       month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
                     })}
+                    {n.updated_at && (
+                      <> · edited {new Date(n.updated_at).toLocaleString('en-US', {
+                        month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+                      })}</>
+                    )}
                   </span>
-                  <button
-                    onClick={() => deleteNote(n.id)}
-                    style={{ background: 'none', color: '#ccc', fontSize: '0.95rem', padding: '0 0.25rem' }}
-                  >×</button>
+                  {editingNoteId !== n.id && (
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <button
+                        onClick={() => startEditNote(n)}
+                        style={{ background: 'none', color: '#999', fontSize: '0.75rem', padding: 0 }}
+                      >Edit</button>
+                      <button
+                        onClick={() => deleteNote(n.id)}
+                        style={{ background: 'none', color: '#ccc', fontSize: '0.95rem', padding: '0 0.25rem' }}
+                      >×</button>
+                    </div>
+                  )}
                 </div>
-                <p style={{ fontSize: '0.88rem', color: '#333', whiteSpace: 'pre-wrap' }}>{n.body}</p>
+                {editingNoteId === n.id ? (
+                  <div>
+                    <textarea
+                      value={editNoteDraft} autoFocus
+                      onChange={e => setEditNoteDraft(e.target.value)}
+                      rows={2} maxLength={1000}
+                      style={{
+                        width: '100%', padding: '0.5rem 0.6rem',
+                        border: '1.5px solid #93c5fd', borderRadius: 8,
+                        fontSize: '0.85rem', resize: 'vertical', marginBottom: '0.35rem', boxSizing: 'border-box',
+                      }}
+                    />
+                    {editNoteError && <p style={{ color: '#d00', fontSize: '0.75rem', marginBottom: '0.35rem' }}>{editNoteError}</p>}
+                    <div style={{ display: 'flex', gap: '0.4rem' }}>
+                      <button
+                        onClick={() => saveEditNote(n.id)}
+                        disabled={editNoteSaving || !editNoteDraft.trim()}
+                        style={{
+                          padding: '0.3rem 0.6rem', borderRadius: 6, background: '#1a1a1a', color: '#fff',
+                          fontSize: '0.75rem', fontWeight: 600,
+                          opacity: (editNoteSaving || !editNoteDraft.trim()) ? 0.5 : 1,
+                        }}
+                      >
+                        {editNoteSaving ? 'Saving…' : 'Save'}
+                      </button>
+                      <button
+                        onClick={() => setEditingNoteId(null)}
+                        style={{ padding: '0.3rem 0.6rem', borderRadius: 6, background: '#f0f0eb', color: '#555', fontSize: '0.75rem' }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p style={{ fontSize: '0.88rem', color: '#333', whiteSpace: 'pre-wrap' }}>{n.body}</p>
+                )}
               </div>
             ))}
             <form onSubmit={addNote} style={{ marginTop: '0.5rem' }}>

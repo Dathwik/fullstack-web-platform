@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const pool = require('../db');
 const requireCustomer = require('../middleware/customerAuth');
-const loginLimiter = require('../middleware/rateLimiter');
+const { loginLimiter, passwordResetLimiter } = require('../middleware/rateLimiter');
 const { sendEmailChangeVerification, sendPasswordResetEmail } = require('../services/mailer');
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -75,7 +75,7 @@ router.post('/logout', (req, res) => {
 // Responds identically whether or not the email is registered, so an attacker (or anyone) can't
 // use this endpoint to enumerate which addresses have accounts — the only observable difference
 // between "sent" and "no such account" would otherwise be the email itself arriving.
-router.post('/forgot-password', loginLimiter, async (req, res) => {
+router.post('/forgot-password', passwordResetLimiter, async (req, res) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'email required' });
@@ -102,7 +102,7 @@ router.post('/forgot-password', loginLimiter, async (req, res) => {
 // POST /api/customers/reset-password — public, consumes a reset token and sets a new password
 // Public rather than requireCustomer for the same reason verify-email is: the whole point is to
 // let in someone who currently *can't* sign in, so requiring a session would defeat the feature.
-router.post('/reset-password', loginLimiter, async (req, res) => {
+router.post('/reset-password', passwordResetLimiter, async (req, res) => {
   try {
     const { token, new_password } = req.body;
     if (!token || !new_password)
@@ -135,11 +135,13 @@ router.post('/reset-password', loginLimiter, async (req, res) => {
 });
 
 // GET /api/customers/me — returns the signed-in customer or null
+// pending_email is included so the frontend can show an in-progress, unconfirmed email change
+// (and offer to cancel it) without a separate round-trip just to check whether one exists.
 router.get('/me', async (req, res) => {
   if (!req.session?.customer_id) return res.json(null);
   try {
     const result = await pool.query(
-      'SELECT id, email, name, phone FROM customers WHERE id=$1',
+      'SELECT id, email, name, phone, pending_email FROM customers WHERE id=$1',
       [req.session.customer_id]
     );
     if (!result.rows.length) {
@@ -174,7 +176,7 @@ router.patch('/me', requireCustomer, async (req, res) => {
 
     params.push(req.session.customer_id);
     const result = await pool.query(
-      `UPDATE customers SET ${fields.join(', ')} WHERE id=$${i} RETURNING id, email, name, phone`,
+      `UPDATE customers SET ${fields.join(', ')} WHERE id=$${i} RETURNING id, email, name, phone, pending_email`,
       params
     );
     res.json(result.rows[0]);
@@ -279,6 +281,26 @@ router.post('/me/email', requireCustomer, loginLimiter, async (req, res) => {
 
     await sendEmailChangeVerification(normalized, result.rows[0].name, token);
     res.json({ pending_email: normalized });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/customers/me/email/cancel — cancel a pending, unconfirmed email change (auth
+// required). Only clears the three verify-flow columns — the live email is never touched by
+// this route, since a pending change never wrote to it in the first place (see POST /me/email).
+router.post('/me/email/cancel', requireCustomer, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE customers
+       SET pending_email=NULL, email_verify_token=NULL, email_verify_expires=NULL
+       WHERE id=$1 AND pending_email IS NOT NULL
+       RETURNING id`,
+      [req.session.customer_id]
+    );
+    if (!result.rows.length)
+      return res.status(404).json({ error: 'No pending email change to cancel' });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
