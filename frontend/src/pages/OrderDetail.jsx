@@ -14,6 +14,16 @@ const NEXT_STATUS = {
   'In Preparation': 'Completed',
 };
 
+// Every Stripe event type this endpoint logs is a raw passthrough of whatever Stripe sent
+// (see backend/src/routes/payments.js's webhook handler), so this only special-cases the two
+// event types staff actually need to visually distinguish at a glance; anything else falls back
+// to a neutral color rather than needing to be enumerated here as Stripe's event catalogue grows.
+function webhookEventColor(eventType) {
+  if (eventType === 'payment_intent.succeeded') return '#15803d';
+  if (eventType === 'payment_intent.payment_failed') return '#b91c1c';
+  return '#555';
+}
+
 const sectionStyle = {
   background: '#fff',
   border: '1.5px solid #e8e8e3',
@@ -549,7 +559,7 @@ export default function OrderDetail() {
                   <div>
                     <p style={{
                       fontSize: '0.82rem', fontWeight: 600,
-                      color: ev.event_type === 'payment_intent.succeeded' ? '#15803d' : '#555',
+                      color: webhookEventColor(ev.event_type),
                     }}>
                       {ev.event_type}
                     </p>

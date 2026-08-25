@@ -16,6 +16,16 @@ const NEXT_STATUS = {
 
 const DAY_LABEL = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+// Every Stripe event type this endpoint logs is a raw passthrough of whatever Stripe sent
+// (see backend/src/routes/payments.js's webhook handler), so this only special-cases the two
+// event types staff actually need to visually distinguish at a glance; anything else falls back
+// to a neutral color rather than needing to be enumerated here as Stripe's event catalogue grows.
+function webhookEventColor(eventType) {
+  if (eventType === 'payment_intent.succeeded') return '#15803d';
+  if (eventType === 'payment_intent.payment_failed') return '#b91c1c';
+  return '#555';
+}
+
 function RevenueChart({ data }) {
   if (!data || data.length === 0) return null;
   const maxRevenue = Math.max(...data.map(d => d.revenue), 1);
@@ -114,6 +124,7 @@ export default function Orders({ onLogout }) {
       if (dateTo)          params.date_to   = dateTo;
       if (search)          params.search    = search;
       if (filter === 'aging') params.aging  = 'true';
+      if (filter === 'payment_failed') params.payment_failed = 'true';
       const res = await api.get('/orders', { params });
       const newOrders = res.data;
 
@@ -248,7 +259,7 @@ export default function Orders({ onLogout }) {
   const filtered = orders.filter(o => {
     if (filter === 'active') return o.status === 'Received' || o.status === 'In Preparation';
     if (filter === 'done')   return o.status === 'Completed' || o.status === 'Cancelled';
-    return true; // 'all' and 'aging' (already filtered server-side)
+    return true; // 'all', 'aging', and 'payment_failed' (already filtered server-side)
   });
 
   return (
@@ -287,6 +298,24 @@ export default function Orders({ onLogout }) {
             {stats.aging.count} order{stats.aging.count > 1 ? 's' : ''} waiting &gt;4 hours — tap to review
           </p>
           <span style={{ fontSize: '0.78rem', color: '#b45309' }}>View</span>
+        </div>
+      )}
+
+      {/* Payment issues alert */}
+      {stats?.payment_failed?.count > 0 && filter !== 'payment_failed' && (
+        <div
+          onClick={() => setFilter('payment_failed')}
+          style={{
+            background: '#fef2f2', border: '1.5px solid #fca5a5',
+            borderRadius: 10, padding: '0.65rem 1rem',
+            marginBottom: '0.75rem', cursor: 'pointer',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          }}
+        >
+          <p style={{ fontSize: '0.82rem', fontWeight: 700, color: '#b91c1c' }}>
+            {stats.payment_failed.count} order{stats.payment_failed.count > 1 ? 's' : ''} with a failed payment — tap to review
+          </p>
+          <span style={{ fontSize: '0.78rem', color: '#b91c1c' }}>View</span>
         </div>
       )}
 
@@ -425,7 +454,7 @@ export default function Orders({ onLogout }) {
               padding: '0.3rem 0', borderBottom: '1px solid #f5f5f0',
             }}>
               <div>
-                <p style={{ fontSize: '0.8rem', fontWeight: 600, color: ev.event_type === 'payment_intent.succeeded' ? '#15803d' : '#555' }}>
+                <p style={{ fontSize: '0.8rem', fontWeight: 600, color: webhookEventColor(ev.event_type) }}>
                   {ev.event_type}
                 </p>
                 {ev.object_id && (
@@ -520,7 +549,7 @@ export default function Orders({ onLogout }) {
 
       {/* Status filter tabs */}
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
-        {[['active','Active'],['done','Done'],['all','All'],['aging','Aging']].map(([val, label]) => (
+        {[['active','Active'],['done','Done'],['all','All'],['aging','Aging'],['payment_failed','Payment issues']].map(([val, label]) => (
           <button key={val} onClick={() => setFilter(val)} style={{
             padding: '0.4rem 0.85rem', borderRadius: 20,
             background: filter === val ? '#1a1a1a' : '#f0f0eb',
@@ -536,6 +565,16 @@ export default function Orders({ onLogout }) {
                 padding: '0.05rem 0.35rem', borderRadius: 10,
               }}>
                 {stats.aging.count}
+              </span>
+            )}
+            {val === 'payment_failed' && stats?.payment_failed?.count > 0 && (
+              <span style={{
+                marginLeft: '0.3rem', fontSize: '0.72rem', fontWeight: 700,
+                background: filter === 'payment_failed' ? 'rgba(255,255,255,0.25)' : '#fca5a5',
+                color: filter === 'payment_failed' ? '#fff' : '#7f1d1d',
+                padding: '0.05rem 0.35rem', borderRadius: 10,
+              }}>
+                {stats.payment_failed.count}
               </span>
             )}
           </button>

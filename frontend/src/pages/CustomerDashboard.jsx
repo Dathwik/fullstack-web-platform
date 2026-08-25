@@ -38,6 +38,7 @@ export default function CustomerDashboard() {
   const [emailError, setEmailError] = useState('');
   const [emailSuccess, setEmailSuccess] = useState('');
   const [savingEmail, setSavingEmail] = useState(false);
+  const [cancelingEmailChange, setCancelingEmailChange] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deletePasswordDraft, setDeletePasswordDraft] = useState('');
   const [deleteError, setDeleteError] = useState('');
@@ -121,12 +122,28 @@ export default function CustomerDashboard() {
         setEmailSuccess("That's already your email — nothing to confirm.");
       } else {
         setEmailSuccess(`Check ${res.data.pending_email} for a confirmation link to finish the change.`);
+        setCustomer(c => ({ ...c, pending_email: res.data.pending_email }));
       }
       setEmailDraft('');
     } catch (err) {
       setEmailError(err.response?.data?.error || 'Failed to request email change');
     } finally {
       setSavingEmail(false);
+    }
+  }
+
+  async function cancelPendingEmailChange() {
+    setCancelingEmailChange(true);
+    try {
+      await api.post('/customers/me/email/cancel');
+      setCustomer(c => ({ ...c, pending_email: null }));
+    } catch {
+      // A 404 here just means it was already confirmed or cancelled elsewhere in the meantime —
+      // either way there's nothing pending, so refetching the current state settles it.
+      const r = await api.get('/customers/me');
+      if (r.data) setCustomer(r.data);
+    } finally {
+      setCancelingEmailChange(false);
     }
   }
 
@@ -193,6 +210,18 @@ export default function CustomerDashboard() {
               <h1 style={{ fontSize: '1.4rem', fontWeight: 700 }}>Hi, {customer.name}</h1>
               <p style={{ fontSize: '0.85rem', color: '#888', marginTop: '0.15rem' }}>{customer.email}</p>
               {customer.phone && <p style={{ fontSize: '0.8rem', color: '#aaa', marginTop: '0.1rem' }}>{customer.phone}</p>}
+              {customer.pending_email && (
+                <p style={{ fontSize: '0.75rem', color: '#b45309', marginTop: '0.2rem' }}>
+                  Pending change to {customer.pending_email} — check your inbox to confirm.{' '}
+                  <button
+                    onClick={cancelPendingEmailChange}
+                    disabled={cancelingEmailChange}
+                    style={{ background: 'none', color: '#1d4ed8', fontSize: '0.75rem', padding: 0, textDecoration: 'underline' }}
+                  >
+                    {cancelingEmailChange ? 'Cancelling…' : 'Cancel'}
+                  </button>
+                </p>
+              )}
               <div style={{ display: 'flex', gap: '0.6rem', marginTop: '0.3rem' }}>
                 <button onClick={startEditProfile} style={{ fontSize: '0.75rem', color: '#1d4ed8', background: 'none', padding: 0 }}>
                   Edit profile

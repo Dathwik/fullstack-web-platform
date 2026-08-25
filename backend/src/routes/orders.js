@@ -85,9 +85,25 @@ router.get('/new-since', requireAuth, async (req, res) => {
 });
 
 // GET /api/orders/stats — summary metrics for the admin dashboard
+// An order's stripe_payment_intent is fixed at creation and never overwritten (a customer whose
+// payment fails must place a new order to retry), so a payment_intent.payment_failed event
+// logged for that PI is a durable "this attempt failed" signal, not one that could later be
+// superseded by a different outcome under the same order.
+const PAYMENT_FAILED_CONDITION = `
+  o.payment_method = 'stripe'
+  AND o.payment_received = FALSE
+  AND o.status <> 'Cancelled'
+  AND EXISTS (
+    SELECT 1 FROM webhook_events we
+    WHERE we.event_type = 'payment_intent.payment_failed'
+      AND (we.payload->'data'->'object'->>'id' = o.stripe_payment_intent
+        OR we.payload->>'id' = o.stripe_payment_intent)
+  )
+`;
+
 router.get('/stats', requireAuth, async (_req, res) => {
   try {
-    const [todayRes, pendingRes, weekRes, unpaidRes, agingRes] = await Promise.all([
+    const [todayRes, pendingRes, weekRes, unpaidRes, agingRes, paymentFailedRes] = await Promise.all([
       pool.query(
         `SELECT COUNT(DISTINCT o.id) AS count,
                 COALESCE(SUM(oi.quantity_kg * p.price_per_kg), 0) AS revenue
@@ -117,14 +133,18 @@ router.get('/stats', requireAuth, async (_req, res) => {
          WHERE status = 'Received'
            AND created_at < NOW() - INTERVAL '4 hours'`
       ),
+      pool.query(
+        `SELECT COUNT(*) AS count FROM orders o WHERE ${PAYMENT_FAILED_CONDITION}`
+      ),
     ]);
 
     res.json({
-      today:   { count: parseInt(todayRes.rows[0].count, 10),   revenue: parseFloat(todayRes.rows[0].revenue) },
-      pending: { count: parseInt(pendingRes.rows[0].count, 10) },
-      week:    { count: parseInt(weekRes.rows[0].count, 10),    revenue: parseFloat(weekRes.rows[0].revenue) },
-      unpaid:  { count: parseInt(unpaidRes.rows[0].count, 10) },
-      aging:   { count: parseInt(agingRes.rows[0].count, 10) },
+      today:          { count: parseInt(todayRes.rows[0].count, 10),   revenue: parseFloat(todayRes.rows[0].revenue) },
+      pending:        { count: parseInt(pendingRes.rows[0].count, 10) },
+      week:           { count: parseInt(weekRes.rows[0].count, 10),    revenue: parseFloat(weekRes.rows[0].revenue) },
+      unpaid:         { count: parseInt(unpaidRes.rows[0].count, 10) },
+      aging:          { count: parseInt(agingRes.rows[0].count, 10) },
+      payment_failed: { count: parseInt(paymentFailedRes.rows[0].count, 10) },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -308,7 +328,7 @@ router.get('/analytics', requireAuth, async (_req, res) => {
 // GET /api/orders — list all orders with optional status + date + search filters
 router.get('/', requireAuth, async (req, res) => {
   try {
-    const { status, date_from, date_to, search, aging } = req.query;
+    const { status, date_from, date_to, search, aging, payment_failed } = req.query;
     const params = [];
     const conditions = [];
 
@@ -330,6 +350,9 @@ router.get('/', requireAuth, async (req, res) => {
     }
     if (aging === 'true') {
       conditions.push(`(o.status = 'Received' AND o.created_at < NOW() - INTERVAL '4 hours')`);
+    }
+    if (payment_failed === 'true') {
+      conditions.push(`(${PAYMENT_FAILED_CONDITION})`);
     }
 
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
