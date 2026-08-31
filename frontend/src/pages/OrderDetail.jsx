@@ -568,6 +568,11 @@ export default function OrderDetail() {
                         {ev.object_id.slice(0, 24)}
                       </p>
                     )}
+                    {ev.decline_reason && (
+                      <p style={{ fontSize: '0.72rem', color: '#b91c1c', marginTop: '0.1rem' }}>
+                        {ev.decline_reason}
+                      </p>
+                    )}
                   </div>
                   <p style={{ fontSize: '0.72rem', color: '#bbb', whiteSpace: 'nowrap', marginLeft: '0.5rem' }}>
                     {new Date(ev.created_at).toLocaleString('en-US', {

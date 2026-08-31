@@ -462,6 +462,11 @@ export default function Orders({ onLogout }) {
                     {ev.object_id.slice(0, 20)}…
                   </p>
                 )}
+                {ev.decline_reason && (
+                  <p style={{ fontSize: '0.72rem', color: '#b91c1c', marginTop: '0.1rem' }}>
+                    {ev.decline_reason}
+                  </p>
+                )}
               </div>
               <p style={{ fontSize: '0.72rem', color: '#bbb' }}>
                 {new Date(ev.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}

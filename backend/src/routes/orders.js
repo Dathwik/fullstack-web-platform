@@ -644,10 +644,25 @@ router.post('/', requireAuth, async (req, res) => {
 
     await client.query('BEGIN');
 
+    // If the email on this order matches a registered customer account, link it — otherwise an
+    // order an admin enters manually on a repeat customer's behalf (e.g. a phone-in order) would
+    // never show up in that customer's own order history or account stats, even though the same
+    // person placed it. POST /orders/public already gets this linkage for free from an active
+    // customer session (req.session.customer_id); this is the admin-side equivalent for when
+    // there's no session to read it from, only an email address to match against.
+    let customerId = null;
+    if (email) {
+      const customerRes = await client.query(
+        'SELECT id FROM customers WHERE email=$1',
+        [email.toLowerCase()]
+      );
+      if (customerRes.rows.length) customerId = customerRes.rows[0].id;
+    }
+
     const orderResult = await client.query(
-      `INSERT INTO orders (customer_name, phone, email, address, special_instructions)
-       VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [customer_name, phone, email || null, address, special_instructions || null]
+      `INSERT INTO orders (customer_name, phone, email, address, special_instructions, customer_id)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [customer_name, phone, email || null, address, special_instructions || null, customerId]
     );
     const order = orderResult.rows[0];
 

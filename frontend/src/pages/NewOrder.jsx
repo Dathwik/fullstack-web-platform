@@ -51,6 +51,11 @@ export default function NewOrder() {
     }
   }
 
+  const selectedTotal = items.reduce((sum, item) => {
+    const product = products.find(p => p.id === item.product_id);
+    return product ? sum + (parseFloat(item.quantity_kg) || 0) * parseFloat(product.price_per_kg) : sum;
+  }, 0);
+
   const inputStyle = {
     width: '100%', padding: '0.75rem 0.9rem',
     border: '1.5px solid #ddd', borderRadius: 10,
@@ -130,6 +135,13 @@ export default function NewOrder() {
             style={{ marginTop: '0.5rem', color: '#1a1a1a', background: 'none', fontSize: '0.85rem', fontWeight: 600, padding: '0.25rem 0' }}>
             + Add item
           </button>
+
+          {selectedTotal > 0 && (
+            <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #f0f0eb', display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.9rem', color: '#555' }}>Order total</span>
+              <span style={{ fontSize: '0.9rem', fontWeight: 700 }}>${selectedTotal.toFixed(2)}</span>
+            </div>
+          )}
         </div>
 
         {/* Notes */}
