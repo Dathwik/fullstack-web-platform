@@ -183,7 +183,9 @@ export default function TrackOrder() {
           {/* Payment */}
           <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 12, padding: '0.75rem 1rem', marginBottom: '0.75rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <p style={{ fontSize: '0.85rem', color: '#999' }}>Payment (Cash on Delivery)</p>
+              <p style={{ fontSize: '0.85rem', color: '#999' }}>
+                Payment ({order.payment_method === 'stripe' ? 'Online card' : 'COD'})
+              </p>
               <span style={{ fontSize: '0.82rem', fontWeight: 600, color: order.payment_received ? '#15803d' : '#b45309' }}>
                 {order.payment_received ? 'Received' : 'Pending'}
               </span>

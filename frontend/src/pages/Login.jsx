@@ -13,8 +13,12 @@ export default function Login({ onLogin }) {
     try {
       await api.post('/auth/login', { password });
       onLogin();
-    } catch {
-      setError('Wrong password');
+    } catch (err) {
+      // The backend distinguishes a wrong password from being rate-limited
+      // (and from a misconfigured server) with different messages — surface whichever one it
+      // actually sent rather than collapsing all three into a hardcoded "Wrong password", which
+      // would tell a locked-out admin the wrong thing about why they can't sign in.
+      setError(err.response?.data?.error || 'Wrong password');
     } finally {
       setLoading(false);
     }

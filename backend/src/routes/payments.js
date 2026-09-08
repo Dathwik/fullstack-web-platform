@@ -105,7 +105,10 @@ async function webhookHandler(req, res) {
 // decline_reason pulls Stripe's human-readable failure message (last_payment_error.message) out
 // of the raw payload — present only on payment_intent.payment_failed events, null otherwise —
 // so the frontend can show *why* a payment failed without every caller having to know Stripe's
-// nested payload shape just to read one string out of it.
+// nested payload shape just to read one string out of it. decline_code is the accompanying
+// stable, enum-like string (e.g. "insufficient_funds", "expired_card") Stripe provides alongside
+// the free-text message — useful for anything that wants to group or filter failures by cause
+// rather than match on prose, which the message alone can't support.
 router.get('/webhook-events', requireAuth, async (req, res) => {
   try {
     const { payment_intent } = req.query;
@@ -118,6 +121,7 @@ router.get('/webhook-events', requireAuth, async (req, res) => {
            event_type,
            payload->'data'->'object'->>'id' AS object_id,
            payload->'data'->'object'->'last_payment_error'->>'message' AS decline_reason,
+           payload->'data'->'object'->'last_payment_error'->>'decline_code' AS decline_code,
            created_at
          FROM webhook_events
          WHERE payload->'data'->'object'->>'id' = $1
@@ -133,6 +137,7 @@ router.get('/webhook-events', requireAuth, async (req, res) => {
            event_type,
            payload->'data'->'object'->>'id' AS object_id,
            payload->'data'->'object'->'last_payment_error'->>'message' AS decline_reason,
+           payload->'data'->'object'->'last_payment_error'->>'decline_code' AS decline_code,
            created_at
          FROM webhook_events
          ORDER BY created_at DESC

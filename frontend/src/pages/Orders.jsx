@@ -464,7 +464,7 @@ export default function Orders({ onLogout }) {
                 )}
                 {ev.decline_reason && (
                   <p style={{ fontSize: '0.72rem', color: '#b91c1c', marginTop: '0.1rem' }}>
-                    {ev.decline_reason}
+                    {ev.decline_reason}{ev.decline_code && ` (${ev.decline_code})`}
                   </p>
                 )}
               </div>

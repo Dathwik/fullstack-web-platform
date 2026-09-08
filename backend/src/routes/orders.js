@@ -155,7 +155,7 @@ router.get('/stats', requireAuth, async (_req, res) => {
 router.get('/track/:id', async (req, res) => {
   try {
     const result = await pool.query(
-      `SELECT o.id, o.customer_name, o.status, o.payment_received, o.created_at,
+      `SELECT o.id, o.customer_name, o.status, o.payment_received, o.payment_method, o.created_at,
         COALESCE(json_agg(
           json_build_object(
             'product_name', p.name,

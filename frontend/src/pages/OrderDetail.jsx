@@ -306,7 +306,7 @@ export default function OrderDetail() {
       </table>
       <p class="total">Total: $${t.toFixed(2)}</p>
       <br>
-      <p style="font-size:0.85rem;color:#666">Payment: Cash on Delivery — ${order.payment_received ? 'Received' : 'Pending'}</p>
+      <p style="font-size:0.85rem;color:#666">Payment: ${order.payment_method === 'stripe' ? 'Online card' : 'Cash on Delivery'} — ${order.payment_received ? 'Received' : 'Pending'}</p>
       <script>window.onload=()=>window.print();<\/script>
     </body></html>`);
     win.document.close();
@@ -570,7 +570,7 @@ export default function OrderDetail() {
                     )}
                     {ev.decline_reason && (
                       <p style={{ fontSize: '0.72rem', color: '#b91c1c', marginTop: '0.1rem' }}>
-                        {ev.decline_reason}
+                        {ev.decline_reason}{ev.decline_code && ` (${ev.decline_code})`}
                       </p>
                     )}
                   </div>
