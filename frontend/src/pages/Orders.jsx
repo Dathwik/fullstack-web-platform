@@ -110,6 +110,7 @@ export default function Orders({ onLogout }) {
   const [topCustomers, setTopCustomers] = useState(null);
   const [showTopCustomers, setShowTopCustomers] = useState(false);
   const [webhookEvents, setWebhookEvents] = useState([]);
+  const [declineReasons, setDeclineReasons] = useState([]);
   const [fulfillmentStats, setFulfillmentStats] = useState(null);
   const [fulfillmentDays, setFulfillmentDays] = useState(30);
   const navigate = useNavigate();
@@ -155,6 +156,7 @@ export default function Orders({ onLogout }) {
     api.get('/products/low-stock').then(r => setLowStock(r.data)).catch(() => {});
     api.get('/orders/analytics').then(r => setAnalytics(r.data)).catch(() => {});
     api.get('/payments/webhook-events').then(r => setWebhookEvents(r.data)).catch(() => {});
+    api.get('/payments/decline-reasons', { params: { days: 30 } }).then(r => setDeclineReasons(r.data)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -471,6 +473,24 @@ export default function Orders({ onLogout }) {
               <p style={{ fontSize: '0.72rem', color: '#bbb' }}>
                 {new Date(ev.created_at).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
               </p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Decline reason breakdown — last 30 days */}
+      {declineReasons.length > 0 && (
+        <div style={{ background: '#fff', border: '1.5px solid #e8e8e3', borderRadius: 10, padding: '0.65rem 1rem', marginBottom: '1rem' }}>
+          <p style={{ fontSize: '0.72rem', color: '#999', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>
+            Decline reasons — last 30 days
+          </p>
+          {declineReasons.map(d => (
+            <div key={d.decline_code} style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '0.25rem 0',
+            }}>
+              <p style={{ fontSize: '0.8rem', color: '#555' }}>{d.decline_code}</p>
+              <p style={{ fontSize: '0.8rem', fontWeight: 600, color: '#b91c1c' }}>{d.count}</p>
             </div>
           ))}
         </div>

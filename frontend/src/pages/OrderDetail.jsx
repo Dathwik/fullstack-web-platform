@@ -323,6 +323,10 @@ export default function OrderDetail() {
   const total = order.items?.reduce(
     (sum, i) => sum + parseFloat(i.quantity_kg) * parseFloat(i.price_per_kg), 0
   ) ?? 0;
+  // Card brand/last4 come from the successful charge's webhook event, not from the order row
+  // itself — this order never stores card details, only whichever PaymentIntent-succeeded event
+  // happened to carry that charge data through Stripe's webhook.
+  const paidCard = stripeEvents.find(ev => ev.card_brand && ev.card_last4);
   const createdAt = new Date(order.created_at).toLocaleString('en-US', {
     month: 'short', day: 'numeric',
     hour: 'numeric', minute: '2-digit', hour12: true,
@@ -522,6 +526,11 @@ export default function OrderDetail() {
                 }}>
                   {order.payment_received ? 'Received' : 'Pending'}
                 </p>
+                {paidCard && (
+                  <p style={{ fontSize: '0.75rem', color: '#888', marginTop: '0.2rem', textTransform: 'capitalize' }}>
+                    {paidCard.card_brand} •••• {paidCard.card_last4}
+                  </p>
+                )}
                 {order.stripe_payment_intent && (
                   <p style={{ fontSize: '0.72rem', color: '#bbb', fontFamily: 'monospace', marginTop: '0.2rem' }}>
                     {order.stripe_payment_intent.slice(0, 22)}…

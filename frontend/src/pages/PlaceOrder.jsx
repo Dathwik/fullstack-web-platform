@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
@@ -38,6 +38,27 @@ function OrderForm({ customer, reorderItems, products }) {
   const [paymentMethod, setPaymentMethod] = useState('cod');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [removedReorderCount, setRemovedReorderCount] = useState(0);
+  const reconciledReorderRef = useRef(false);
+
+  // Reconcile reorderItems against real product data once it loads. `products` only ever
+  // contains available, in-stock products (filtered by the parent on fetch), but `items` was
+  // seeded directly from a past order's product_ids with no such filtering — a product that's
+  // since been taken off the menu or gone out of stock would otherwise sit in `items` as a
+  // product_id that matches nothing in the dropdown (rendering as a blank selection) and
+  // silently contributes $0 to the total, only to be rejected by the backend at submit time
+  // with no earlier warning. Runs once, guarded by a ref, so it never clobbers items the
+  // customer has since edited by hand.
+  useEffect(() => {
+    if (reconciledReorderRef.current || !reorderItems || products.length === 0) return;
+    reconciledReorderRef.current = true;
+    const validIds = new Set(products.map(p => p.id));
+    const stillValid = items.filter(i => validIds.has(i.product_id));
+    if (stillValid.length < items.length) {
+      setRemovedReorderCount(items.length - stillValid.length);
+      setItems(stillValid.length ? stillValid : [{ product_id: '', quantity_kg: 1 }]);
+    }
+  }, [products, items, reorderItems]);
 
   // Pre-fill from logged-in customer
   useEffect(() => {
@@ -157,6 +178,12 @@ function OrderForm({ customer, reorderItems, products }) {
       {/* Items */}
       <div style={{ background: '#fff', borderRadius: 12, padding: '1rem', marginBottom: '1rem', border: '1.5px solid #e8e8e3' }}>
         <p style={{ fontWeight: 600, marginBottom: '0.75rem', fontSize: '0.9rem' }}>Items</p>
+
+        {removedReorderCount > 0 && (
+          <p style={{ fontSize: '0.8rem', color: '#b45309', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '0.5rem 0.65rem', marginBottom: '0.65rem' }}>
+            {removedReorderCount} item{removedReorderCount > 1 ? 's' : ''} from your previous order {removedReorderCount > 1 ? 'are' : 'is'} no longer available and {removedReorderCount > 1 ? 'were' : 'was'} removed. Please review before submitting.
+          </p>
+        )}
 
         {items.map((item, i) => (
           <div key={i} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', alignItems: 'center' }}>

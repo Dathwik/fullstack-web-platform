@@ -108,7 +108,9 @@ async function webhookHandler(req, res) {
 // nested payload shape just to read one string out of it. decline_code is the accompanying
 // stable, enum-like string (e.g. "insufficient_funds", "expired_card") Stripe provides alongside
 // the free-text message — useful for anything that wants to group or filter failures by cause
-// rather than match on prose, which the message alone can't support.
+// rather than match on prose, which the message alone can't support. card_brand/card_last4 pull
+// the card network and last four digits out of a successful charge's payment_method_details —
+// present only on payment_intent.succeeded events for a card payment, null otherwise.
 router.get('/webhook-events', requireAuth, async (req, res) => {
   try {
     const { payment_intent } = req.query;
@@ -122,6 +124,8 @@ router.get('/webhook-events', requireAuth, async (req, res) => {
            payload->'data'->'object'->>'id' AS object_id,
            payload->'data'->'object'->'last_payment_error'->>'message' AS decline_reason,
            payload->'data'->'object'->'last_payment_error'->>'decline_code' AS decline_code,
+           payload->'data'->'object'->'charges'->'data'->0->'payment_method_details'->'card'->>'brand' AS card_brand,
+           payload->'data'->'object'->'charges'->'data'->0->'payment_method_details'->'card'->>'last4' AS card_last4,
            created_at
          FROM webhook_events
          WHERE payload->'data'->'object'->>'id' = $1
@@ -138,6 +142,8 @@ router.get('/webhook-events', requireAuth, async (req, res) => {
            payload->'data'->'object'->>'id' AS object_id,
            payload->'data'->'object'->'last_payment_error'->>'message' AS decline_reason,
            payload->'data'->'object'->'last_payment_error'->>'decline_code' AS decline_code,
+           payload->'data'->'object'->'charges'->'data'->0->'payment_method_details'->'card'->>'brand' AS card_brand,
+           payload->'data'->'object'->'charges'->'data'->0->'payment_method_details'->'card'->>'last4' AS card_last4,
            created_at
          FROM webhook_events
          ORDER BY created_at DESC
@@ -145,6 +151,34 @@ router.get('/webhook-events', requireAuth, async (req, res) => {
       );
     }
     res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/payments/decline-reasons?days=30 — breakdown of failed-payment decline codes (admin
+// only), most common first. Groups by decline_code rather than the free-text decline_reason
+// message, since the code is the stable value meant for exactly this kind of aggregation — two
+// failures with the same code always mean the same underlying cause, which two failures with
+// superficially different wording of the same message can't guarantee.
+router.get('/decline-reasons', requireAuth, async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days, 10) || 30, 365);
+    const result = await pool.query(
+      `SELECT
+         COALESCE(payload->'data'->'object'->'last_payment_error'->>'decline_code', 'unknown') AS decline_code,
+         COUNT(*) AS count
+       FROM webhook_events
+       WHERE event_type = 'payment_intent.payment_failed'
+         AND created_at >= NOW() - ($1 || ' days')::interval
+       GROUP BY decline_code
+       ORDER BY count DESC`,
+      [days]
+    );
+    res.json(result.rows.map(r => ({
+      decline_code: r.decline_code,
+      count: parseInt(r.count, 10),
+    })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

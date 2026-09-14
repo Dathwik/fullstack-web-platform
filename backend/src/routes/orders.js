@@ -553,10 +553,19 @@ async function insertItemsWithStockCheck(client, orderId, items) {
       throw new Error('Each item needs product_id and quantity_kg (min 1kg)');
 
     const stockRes = await client.query(
-      'SELECT stock_kg FROM products WHERE id=$1 FOR UPDATE',
+      'SELECT stock_kg, is_available FROM products WHERE id=$1 FOR UPDATE',
       [item.product_id]
     );
     if (!stockRes.rows.length) throw new Error('Product not found');
+    // Every product dropdown (NewOrder.jsx, PlaceOrder.jsx) already filters is_available
+    // products out of its own options, but that's a client-side convenience, not enforcement —
+    // a stale product_id (most commonly: reordering an order whose product has since been
+    // taken off the menu) bypasses that filter entirely by never going through the dropdown.
+    // POST /payments/create-intent already checks this for Stripe orders before a card is
+    // charged; this closes the same gap for COD orders and any other direct insertion path,
+    // which had no equivalent check at all until now.
+    if (!stockRes.rows[0].is_available)
+      throw new Error('One of the items in this order is no longer available');
 
     const stock = stockRes.rows[0].stock_kg;
     if (stock !== null && parseFloat(stock) < parseFloat(item.quantity_kg))
